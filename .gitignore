@@ -1,0 +1,6 @@
+scripts/__pycache__
+sftp-config.json
+.ipynb_checkpoints
+.DS_Store
+scripts/.DS_Store
+scripts/.ipynb_checkpoints
