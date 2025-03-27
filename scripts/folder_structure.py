@@ -24,7 +24,7 @@ class FolderStructure:
         # mmseqs params
         mmseqs_dict = {'mmseqs_binary': "/opt/homebrew/bin/mmseqs",
                     'min_identity': 0.0,
-                    'min_coverage': 0.5,
+                    'min_coverage': 0.8,
                     'max_evalue': 10**-3,
                     'sensitivity': 7.5,
                     'min_pc_freq': 0.001, # equivalent of min_af
@@ -34,6 +34,17 @@ class FolderStructure:
         min_identity = (str(int(float(mmseqs_dict['min_identity']) * 100))).zfill(2)
         min_coverage = (str(int(float(mmseqs_dict['min_coverage']) * 100))).zfill(2)
         mmseqs_dict['version'] = f'PCI{min_identity}C{min_coverage}'
+
+        report_topology_map = [
+            (0, 'Pectin lyase-like', 'Pectin lyase-like'),
+            (1, 'SGNH hydrolase', 'SGNH hydrolase'),
+            (2, 'Alanine racemase-C', 'Alanine racemase-C'),
+            (3, 'Intramolecular chaperone', 'Intramolecular chaperone'),
+            (4, 'Concanavalin A-like', 'Concanavalin A-like'),
+            (5, 'bladed', 'x-bladed'),
+            (6, 'spike', 'tail spike')
+            ]
+
 
         # gwas
         elastic_net_dict = {'correction': True, 'alpha': 0.0069}
@@ -82,6 +93,8 @@ class FolderStructure:
                                    'PCI50C50': ['KL48'],
                                    'PCI50C80': ['KL28', 'KL48']}
 
+
+
         # params
         params_dict = {}
         params_dict['input']  = input_processing_dict
@@ -89,6 +102,7 @@ class FolderStructure:
         params_dict['gwas'] = gwas_dict
         params_dict['colors_and_shapes'] = colors_and_shapes_dict
         params_dict['manual_alpha_adjustment'] = manual_alpha_adjustment
+        params_dict['report_topology_map'] = report_topology_map
 
         return params_dict
 
@@ -163,6 +177,7 @@ class FolderStructure:
         # processed
         processed_dir = Path(intermediate_dir, '1_PROCESSED_INPUT', input_processed_version)
         processed_proteins_dir = Path(processed_dir, '1_PROTEINS')
+        processed_functions_dir = Path(processed_dir, '2_FUNCTIONS')
 
         bacteria_tsv = Path(processed_dir, 'bacteria.tsv')
         prophages_tsv = Path(processed_dir, 'prophages.tsv')
@@ -172,14 +187,15 @@ class FolderStructure:
         protein_length_tsv = Path(processed_proteins_dir, 'protein_length.tsv')
         protein_sequences_tsv = Path(processed_proteins_dir, 'protein_seq.tsv')
         recombinant_depos_table = Path(processed_proteins_dir, 'enzymes.tsv')
-        pc80_map_tsv = Path(processed_proteins_dir, 'pc80_map.tsv')
-        pc80_functions_tsv  = Path(processed_proteins_dir, 'pc80_functions.tsv')
-        pc80_functions_best_tsv  = Path(processed_proteins_dir, 'pc80_functions_best.tsv')
+        pc80_map_tsv = Path(processed_functions_dir, 'pc80_map.tsv')
+        pc80_functions_tsv  = Path(processed_functions_dir, 'pc80_functions.tsv')
+        pc80_functions_best_tsv  = Path(processed_functions_dir, 'pc80_functions_best.tsv')
 
         # dict
         input_processed_dict = {
                     "processed_dir": processed_dir,
                     "processed_proteins_dir": processed_proteins_dir,
+                    "processed_functions_dir": processed_functions_dir,
                     "bacteria_tsv": bacteria_tsv,
                     "prophages_tsv": prophages_tsv,
                     "processed_bacteria_tree_nwk": processed_bacteria_tree_nwk,
@@ -212,14 +228,16 @@ class FolderStructure:
 
         # functions
         functions_dir = Path(intermediate_dir, '3_FUNCTIONS', annotation_tool, mmseqs_version)
-        pc80_to_gwas_map = Path(functions_dir, 'pc80_to_gwas_map.tsv')
-        gwas_predicted_functions = Path(functions_dir, 'gwas_predicted_functions.tsv')
+        clusters_map = Path(functions_dir, 'clusters_map.tsv')
+        clusters_functions = Path(functions_dir, 'clusters_functions.tsv')
+        clusters_functions_best = Path(functions_dir, 'clusters_functions_best.tsv')
 
         # dict
         functions_dict = {
                     "functions_dir": functions_dir,
-                    "pc80_to_gwas_map": pc80_to_gwas_map,
-                    "gwas_predicted_functions": gwas_predicted_functions
+                    "clusters_map": clusters_map,
+                    "clusters_functions": clusters_functions,
+                    "clusters_functions_best": clusters_functions_best
                     }
 
 
@@ -284,9 +302,7 @@ class FolderStructure:
         raw_pyseer_table = Path(intermediate_dir, '1_raw_pyseer.tsv')
         clean_pyseer_table = Path(intermediate_dir, '2_clean_pyseer.tsv')
         pcs_metrics_table = Path(intermediate_dir, '3_pcs_metrics.tsv')
-        proteins_functions_table = Path(intermediate_dir, '4A_proteins_functions.tsv')
-        pc_functions_table = Path(intermediate_dir, '4B_pc_functions.tsv')
-        pyseer_bootstrap_table = Path(intermediate_dir, '5_pyseer_bootstrap.tsv')
+        pyseer_bootstrap_table = Path(intermediate_dir, '4_pyseer_bootstrap.tsv')
         
         pyseer_hits_version_table_all = Path(versions_dir, 'pyseer_hits_all.tsv')
         pyseer_hits_version_table_filtered = Path(versions_dir, 'pyseer_hits_filtered.tsv')
@@ -303,8 +319,6 @@ class FolderStructure:
             "raw_pyseer_table": raw_pyseer_table,
             "clean_pyseer_table": clean_pyseer_table,
             "pcs_metrics_table": pcs_metrics_table,
-            "proteins_functions_table": proteins_functions_table,
-            "pc_functions_table": pc_functions_table,
             "pyseer_bootstrap_table": pyseer_bootstrap_table,
             "pyseer_hits_version_table_all": pyseer_hits_version_table_all,
             "pyseer_hits_version_table_filtered": pyseer_hits_version_table_filtered,

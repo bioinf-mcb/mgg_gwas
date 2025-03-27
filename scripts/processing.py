@@ -15,6 +15,7 @@ class Processor:
         self.version = params['mmseqs']['version']
         self.phenotypes = params['gwas']['phenotypes']
         self.nbootstrap = params['gwas']['nbootstrap']
+        self.report_topology_map = params['report_topology_map']
 
         self.lasso_dir = structure['gwas']['lasso_dir']
         self.elastic_net_dir = structure['gwas']['elastic_net_dir']
@@ -27,20 +28,17 @@ class Processor:
 
         self.bacteria_table = structure['input_processed']['bacteria_tsv']
         self.clusters_mmseqs = structure['mmseqs']['clusters']
-        self.proteins_functions = structure['functions']['proteins_functions']
+        self.clusters_functions = structure['functions']['clusters_functions']
 
         # output
         self.pyseer_cols = ['PC', 'pvalue', 'beta', 'locus_nbootstrap', 'mode']
         self.metrics_cols = ['PC', 'locus_nbootstrap', 'TP', 'FN', 'TN', 'FP', 'precision', 'recall', 'specificity', 'accuracy', 'F1_score', 'MCC', 'TP_SC','FN_SC','TN_SC','FP_SC','precision_SC','recall_SC','specificity_SC','accuracy_SC','F1_score_SC', 'MCC_SC', 'PC_abundance', 'locus_abundance', 'PC_freq']
-        self.pyseer_bootstrap_table_cols = ['version', 'PC', 'mode', 'locus', 'nbootstrap', 'minus_log10_pvalue_corr', 'beta', 'precision', 'recall',  'precision_SC','recall_SC', 'PC_abundance', 'locus_abundance', 'PC_freq', 'TP', 'FN', 'TN', 'FP', 'specificity', 'accuracy', 'F1_score', 'MCC', 'TP_SC','FN_SC','TN_SC','FP_SC','specificity_SC','accuracy_SC','F1_score_SC', 'MCC_SC', 'pvalue', 'n_PC_tested', 'pvalue_corr', 'minus_log10_pvalue', 'reported_topology', 'ntopologies', 'ECOD1', 'ECOD2', 'ECOD3', 'ECOD4', 'ECOD5', 'PHROGS1', 'PHROGS2', 'PFAM']
-        self.pc_functions_cols = ['PC', 'reported_topology', 'ntopologies', 'ECOD1', 'ECOD2', 'ECOD3', 'ECOD4', 'ECOD5', 'PHROGS1', 'PHROGS2', 'PFAM']
+        self.pyseer_bootstrap_table_cols = ['version', 'PC', 'mode', 'locus', 'nbootstrap', 'minus_log10_pvalue_corr', 'beta', 'precision', 'recall',  'precision_SC','recall_SC', 'PC_abundance', 'locus_abundance', 'PC_freq', 'TP', 'FN', 'TN', 'FP', 'specificity', 'accuracy', 'F1_score', 'MCC', 'TP_SC','FN_SC','TN_SC','FP_SC','specificity_SC','accuracy_SC','F1_score_SC', 'MCC_SC', 'pvalue', 'n_PC_tested', 'pvalue_corr', 'minus_log10_pvalue']
         self.pyseer_aggregated_cols = ['version', 'PC', 'mode', 'locus', 'nbootstrap', 'minus_log10_pvalue_corr', 'beta', 'precision', 'recall',  'precision_SC','recall_SC', 'PC_abundance', 'locus_abundance', 'PC_freq', 'TP', 'FN', 'TN', 'FP', 'specificity', 'accuracy', 'F1_score', 'MCC', 'TP_SC','FN_SC','TN_SC','FP_SC','specificity_SC','accuracy_SC','F1_score_SC', 'MCC_SC', 'pvalue', 'n_PC_tested', 'pvalue_corr', 'minus_log10_pvalue']
         
         self.pyseer_tsv = structure['processed']['raw_pyseer_table']
         self.processed_pyseer_tsv = structure['processed']['clean_pyseer_table']
         self.variants_metrics = structure['processed']['pcs_metrics_table']
-        self.proteins_functions_table = structure['processed']['proteins_functions_table']
-        self.pc_functions_table = structure['processed']['pc_functions_table']
         self.pyseer_bootstrap_table = structure['processed']['pyseer_bootstrap_table']
 
         # pyseer hits: per clustering (version)
@@ -413,7 +411,6 @@ class Processor:
         # load
         metrics_df = pd.read_csv(self.variants_metrics, sep='\t')
         btsp_pyseer_df = pd.read_csv(self.processed_pyseer_tsv, sep='\t')
-        pc_functions_df = pd.read_csv(self.pc_functions_table, sep='\t')
         n_variants_df = pd.read_csv(self.gwas_n_variants, sep='\t')
 
         # version
@@ -461,14 +458,6 @@ class Processor:
         # convert
         btsp_pyseer_df['minus_log10_pvalue'] = -np.log10(btsp_pyseer_df['pvalue'])
         btsp_pyseer_df['minus_log10_pvalue_corr'] = -np.log10(btsp_pyseer_df['pvalue_corr'])
-
-
-        ####################
-        #### TOPOLOGIES ####
-        ####################
-
-        # ECOD topologies
-        btsp_pyseer_df = btsp_pyseer_df.merge(pc_functions_df, on='PC', how='left')
 
 
         ###############
@@ -635,107 +624,23 @@ class Processor:
         glob_concat_versions_tables(versions_dir, pattern, outfile)
 
 
-    def map_functions_topologies(self):
-        """
-        ECOD selection algorithm:
-        1. Take all functions that map from PC80 to PC from GWAS [ECOD1,ECOD2,ECOD3,ECOD4,ECOD5]. 
-        2. Take all the mapped functions to the PC.
-        3. Report 5 the most frequent ECODs.
-
-        PHROGS selection:
-        Seperately for PHROGS1 and PHROGS2, find the most frequent function and report that.
-        """
-
-        def get_top_values(series, n=5, fill_value='-'):
-            """
-            Returns the top n most frequent values in the series.
-            If there are fewer than n unique values, fills the rest with fill_value.
-            """
-            counts = series.value_counts().sort_values(ascending=False)
-            top = counts.head(n).index.tolist()
-            top += [fill_value] * (n - len(top))
-            return top
-
-        def get_most_frequent(series):
-            """
-            Returns the most frequent value in the series.
-            If the series is empty (or has no valid counts), returns the default '-'.
-            """
-            counts = series.value_counts().sort_values(ascending=False)
-            return counts.idxmax() if not counts.empty else '-'
-
-
-        # report 
-        report_priority = [
-                   (0, 'Pectin lyase-like', 'Pectin lyase-like'),
-                   (1, 'SGNH hydrolase', 'SGNH hydrolase'),
-                   (2, 'Alanine racemase-C', 'Alanine racemase-C'),
-                   (3, 'Intramolecular chaperone domain in virus tail spike protein', 'Intramolecular chaperone domain'),
-                   (4, 'Galactose-binding domain-like', 'Galactose-binding domain-like'),
-                   (5, 'Putative tailspike protein Orf210 N-terminal domain', 'Putative tailspike domain'),
-                   (6, 'bladed', 'x-bladed'),
-                   (7, 'Ubiquitin-like', 'Ubiquitin-like'),
-                   (8, 'TIM barrels', 'TIM barrels')
-                   ]
-
-
-        # load
-        mmseqs_df = pd.read_csv(self.clusters_mmseqs, sep='\t', usecols=[1,2])
-        proteins_with_functions_pc80_df = pd.read_csv(self.proteins_functions, sep='\t')
-
-        # map pc80 to GWAS clustering
-        mapped_functions_df = mmseqs_df.merge(proteins_with_functions_pc80_df, on='proteinID', how='left')
-        mapped_functions_df.to_csv(self.proteins_functions_table, sep='\t', index=False)
-
-
-        ### REPORT ECODS AND PHROGS
-
-        # for all columns (ECOD1, ECOD2, ...) select the most frequent function for this clustering
-        # seperately, for PHROGS1 and PHROGS2, find the most frequent function and report that.
+    # def map_functions_topologies(self):
         
+    #     # paths
+    #     clusters_functions = self.structure['functions']['clusters_functions']
 
-        # Define the columns for ECOD and PHROGS
-        ecod_cols = ['ECOD1', 'ECOD2', 'ECOD3', 'ECOD4', 'ECOD5']
-        phrogs_cols = ['PHROGS1', 'PHROGS2']
-        pfam_cols = ['PFAM']
+    #     # load
+    #     clusters_functions_df = pd.read_csv(clusters_functions, sep='\t')
 
-        reported_functions = []
-
-        # Group by 'PC'
-        for pcid, group in mapped_functions_df.groupby('PC'):
-            
-            # --- Process ECOD columns ---
-            all_ecods = pd.concat([group[col] for col in ecod_cols])
-            valid_ecods = all_ecods[all_ecods != '-']
-            top_five_ecods = get_top_values(valid_ecods, n=5, fill_value='-')
-            
-            # --- Process PHROGS columns ---
-            top_phrogs = [get_most_frequent(group[col]) for col in phrogs_cols]
-
-            # --- Process PFAM columns ---
-            top_pfam = [get_most_frequent(group[col]) for col in pfam_cols]
-            
-            # merge
-            row = [pcid] + top_five_ecods + top_phrogs + top_pfam
-            reported_functions.append(row)
+    #     # map topologies
+    #     cols = ['PC', 'version', 'PC80', 'function', 'reported_topology_PC80', 'reported_topology_PC']
+    #     mapping_df = mapping_df[cols]
+    #     mapping_df['PC-version-PC80'] = mapping_df[['PC', 'version', 'PC80']].astype(str).agg('-'.join, axis=1)
+    #     mapping_df = mapping_df.drop_duplicates(['PC-version-PC80'])
 
 
-        # create data frame
-        columns = ['PC'] + ecod_cols + phrogs_cols + pfam_cols
-        reported_functions_df = pd.DataFrame(reported_functions, columns=columns)
 
-        # report one topology
-        reported_functions_df['reported_topology'] = reported_functions_df[ecod_cols].apply(
-        lambda row: _get_report_topology(row.tolist(), report_priority), axis=1)
-
-        # calculate number of ECOD topologies
-        reported_functions_df['ntopologies'] = reported_functions_df[ecod_cols].ne('-').sum(axis=1)
-
-        # save
-        cols = self.pc_functions_cols
-        reported_functions_df.to_csv(self.pc_functions_table, sep='\t', index=False)
-
-
+        
 
 
 def _safe_division(numerator, denominator):
@@ -780,6 +685,9 @@ def _get_report_topology(ecod_values, report_priority, default='-'):
             return reported_value
     
     return default       
+
+
+
 
 
 

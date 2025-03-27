@@ -64,16 +64,17 @@ class VariablesManager:
 
         # params
         mmseqs_version = self.params['mmseqs']['version']
+        report_topology_map = self.params['report_topology_map']
 
         # paths
         pc80_map_tsv = self.structure['input_processed']['pc80_map_tsv']
-        pc80_functions_tsv = self.structure['input_processed']['pc80_functions_tsv']
+        pc80_functions_best_tsv = self.structure['input_processed']['pc80_functions_best_tsv']
 
-        pc80_to_gwas_map = self.structure['functions']['pc80_to_gwas_map']
-        gwas_predicted_functions = self.structure['functions']['gwas_predicted_functions']
+        clusters_map = self.structure['functions']['clusters_map']
+        clusters_functions = self.structure['functions']['clusters_functions']
 
         # list
-        map_functions_vars = [pc80_map_tsv, pc80_functions_tsv, pc80_to_gwas_map, gwas_predicted_functions, mmseqs_version]
+        map_functions_vars = [pc80_map_tsv, pc80_functions_best_tsv, clusters_map, clusters_functions, mmseqs_version, report_topology_map]
 
         return map_functions_vars
     

@@ -256,19 +256,20 @@ class MMseqsClustering:
                 pass
 
 
-    def map_functions(self, pc80_map_tsv, pc80_functions_tsv, pc80_to_gwas_map, gwas_predicted_functions, mmseqs_version):
+    def map_functions(self, pc80_map_tsv, pc80_functions_best_tsv, clusters_map, clusters_functions, mmseqs_version, report_topology_map):
 
         # paths
         clusters = self.clusters
-        pc80_map_tsv = pc80_map_tsv
-        pc80_functions_tsv = pc80_functions_tsv
-        pc80_to_gwas_map = pc80_to_gwas_map
-        gwas_predicted_functions = gwas_predicted_functions
 
-        # read
+        pc80_map_tsv = pc80_map_tsv
+        pc80_functions_best_tsv = pc80_functions_best_tsv
+        clusters_map = clusters_map
+        clusters_functions = clusters_functions
+
+        # load
         mmseqs_df = pd.read_csv(clusters, sep='\t')
         pc80_map_df = pd.read_csv(pc80_map_tsv, sep='\t')
-        pc80_functions_df = pd.read_csv(pc80_functions_tsv, sep='\t')
+        pc80_functions_best_df = pd.read_csv(pc80_functions_best_tsv, sep='\t')
 
         # clean
         mmseqs_df = mmseqs_df.drop('repr', axis=1)
@@ -276,18 +277,63 @@ class MMseqsClustering:
         mmseqs_df['version'] = mmseqs_version
 
         # map pc80 to GWAS clustering
-        pc80_to_gwas_clusters_df = mmseqs_df.merge(pc80_map_df, on='proteinID', how='left')
+        mapping_df = mmseqs_df.merge(pc80_map_df, on='proteinID', how='left')
 
         # save
         cols = ['PC', 'version', 'PC80', 'genomeID', 'prophageID', 'proteinID', 'length_aa']
-        pc80_to_gwas_clusters_df = pc80_to_gwas_clusters_df[cols]
-        pc80_to_gwas_clusters_df.to_csv(pc80_to_gwas_map, sep='\t', index=False)
+        mapping_df = mapping_df[cols]
+        mapping_df.to_csv(clusters_map, sep='\t', index=False)
 
 
-        # map pc80 to gwas functions
-        gwas_with_functions_df = pc80_to_gwas_clusters_df.merge(pc80_functions_df, on='PC80', how='left')
-        gwas_with_functions_df.to_csv(gwas_predicted_functions, sep='\t', index=False)
-        # print(pc80_functions_df.head())
+        # retain only mapping of pc to pc80
+        cols = ['PC', 'version', 'PC80']
+        mapping_df = mapping_df[cols]
+
+        mapping_df['PC-version-PC80'] = mapping_df['PC'] + '-' + mapping_df['version'] + '-' + mapping_df['PC80']
+        mapping_df = mapping_df.drop_duplicates('PC-version-PC80')
+        mapping_df = mapping_df.drop('PC-version-PC80', axis=1)
+
+        # map functions
+        mapping_df = mapping_df.merge(pc80_functions_best_df, on='PC80', how='left')
+
+
+        # report topology for gwas clusters
+        report_topology_order = [entry[2] for entry in sorted(report_topology_map, key=lambda element: element[0])]
+        pc80_to_gwas_topologies_map = {}
+
+        for pcid, group in mapping_df.groupby('PC'):
+            unique_reported_topologies = group['reported_topology_PC80'].unique()
+            
+            # no hit
+            if len(unique_reported_topologies) == 1 and unique_reported_topologies[0] == 'no hit':
+                pc80_to_gwas_topologies_map[pcid] = 'no hit'
+                continue
+            
+            # other
+            if len(unique_reported_topologies) == 2 and set(unique_reported_topologies) == {'no hit', 'other'}:
+                pc80_to_gwas_topologies_map[pcid] = 'other'
+                continue
+
+            # other
+            if len(unique_reported_topologies) == 1 and unique_reported_topologies[0] == 'other':
+                pc80_to_gwas_topologies_map[pcid] = 'other'
+                continue
+
+            
+            # otherwise report topology
+            for topology in report_topology_order:
+                if topology in unique_reported_topologies:
+                    pc80_to_gwas_topologies_map[pcid] = topology
+                    break
+
+        # apply
+        mapping_df['reported_topology_PC'] = mapping_df['PC'].map(pc80_to_gwas_topologies_map)
+
+        # save
+        cols = ['PC','version','PC80','db','function','reported_topology_PC80','reported_topology_PC','prob','bits','target','pvalue','ident','qcov','tcov','qstart','qend','qlength','tstart','tend','tlength','evalue','name','color','annot','category','phrog/alan_profile']
+        mapping_df = mapping_df[cols]
+        mapping_df.to_csv(clusters_functions, sep='\t', index=False)
+        
 
 
 def _get_alignment_for_pc(pc, group, seq_dict, alignments_dir):

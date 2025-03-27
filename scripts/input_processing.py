@@ -32,6 +32,7 @@ class InputProcessor:
         self.phrogs_prob_threshold = params['input']['phrogs_prob_threshold']
         self.pfam_prob_threshold = params['input']['pfam_prob_threshold']
         self.alan_prob_threshold = params['input']['alan_prob_threshold']
+        self.report_topology_map = params['report_topology_map']
 
 
         ### paths
@@ -281,11 +282,12 @@ class InputProcessor:
         pcs_df = pd.read_csv(pcs2proteins_file, sep='\t')
         protein_length_df = pd.read_csv(protein_length, sep='\t')
         pcs2proteins_df = pcs_df.merge(protein_length_df, on='proteinID', how='outer')
-        
+
         # filter pc80 by length
         pcs2proteins_df = pcs2proteins_df.loc[~pcs2proteins_df['length_aa'].isna()].reset_index(drop=True)
         pcs2proteins_df = pcs2proteins_df.rename({'PC': 'PC80'}, axis=1)
         all_pcs80 = list(pcs2proteins_df['PC80'].unique())
+        all_pcs80_df = pd.DataFrame({'PC80': all_pcs80}).dropna()
 
         # filter hhsearch results by probability
         filt_ecod = (search_df['db'] == "ECOD") & (search_df['prob'] >= self.ecod_prob_threshold)
@@ -300,25 +302,20 @@ class InputProcessor:
         # clean
         search_df = search_df.rename({'query': 'PC80'}, axis=1)
         search_df['function'] = search_df.apply(_parse_db_annotations, axis=1)
-        
 
         def _compute_reported_topology(sub_df):
-            topology_map = [
-            (0, 'Pectin lyase-like', 'Pectin lyase-like'),
-            (1, 'SGNH hydrolase', 'SGNH hydrolase'),
-            (2, 'Alanine racemase-C', 'Alanine racemase-C'),
-            (3, 'Intramolecular chaperone', 'Intramolecular chaperone'),
-            (4, 'Concanavalin A-like', 'Concanavalin A-like'),
-            (5, 'bladed', 'x-bladed'),
-            (6, 'spike', 'tail spike')
-            ]
-
             ecod_rows = sub_df[sub_df['db'] == 'ECOD']
-            return _report_topology_for_group(ecod_rows, topology_map)
+            return _report_topology_for_group(ecod_rows, self.report_topology_map)
 
 
         reported_topologies_map = search_df.groupby('PC80').apply(_compute_reported_topology)
-        search_df['reported_topology'] = search_df['PC80'].map(reported_topologies_map)
+        search_df['reported_topology_PC80'] = search_df['PC80'].map(reported_topologies_map)
+
+        # add missing pc80 (no hit)
+        search_df = all_pcs80_df.merge(search_df, on='PC80', how='left')
+        search_df[['db', 'function', 'reported_topology_PC80']] = \
+        search_df[['db', 'function', 'reported_topology_PC80']].fillna('no hit')
+    
 
         # sort
         search_df['PC-sort'] = search_df['PC80'].str.strip('PC').astype(int)
@@ -326,25 +323,31 @@ class InputProcessor:
         search_df = search_df.drop('PC-sort', axis=1)
 
         # sort cols
-        functions_cols = ['PC80', 'db', 'function', 'reported_topology', 'prob', 'bits']
+        functions_cols = ['PC80', 'db', 'function', 'reported_topology_PC80', 'prob', 'bits']
         rest_cols = [col for col in list(search_df.columns) if col not in functions_cols]
         search_df = search_df[functions_cols + rest_cols]
 
-        def get_best_hit(group):
-            return group.loc[group['bits'].idxmax()]
-
-        ### best hits
+        # report best hits for pc80
         best_hits_list = []
         for (pcid, db), group in search_df.groupby(['PC80', 'db']):
-            if db == 'PFAM' or db == 'ALANDB':  
-                best_hits_list.append(get_best_hit(group))
-            elif db == 'PHROGS' or db == 'ECOD': 
+            if db  == 'PFAM': 
                 for func, subgroup in group.groupby('function'):
-                    best_hits_list.append(get_best_hit(subgroup))
+                    best_hits_list.append(_get_max_bitscore_hit(subgroup, nrows=1))
+                if pcid == 'PC0001':
+                    print(best_hits_list)
+            elif db == 'ALANDB':
+                best_hits_list.append(_get_max_bitscore_hit(group, nrows=1))
+            elif db == 'PHROGS':
+                for func, subgroup in group.groupby('function'):
+                    best_hits_list.append(_get_max_bitscore_hit(subgroup, nrows=1))
+            elif db == 'ECOD':
+                best_hits_list.append(_report_unique_x_levels(group))
+            elif db == 'no hit':
+                best_hits_list.append(group)
             else:
                 raise ValueError(f'ERROR! DB NOT RECOGNIZED: {db}')
 
-        best_hits_df = pd.DataFrame(best_hits_list).reset_index(drop=True)
+        best_hits_df = pd.concat(best_hits_list).reset_index(drop=True)
 
         # save
         pcs2proteins_df.to_csv(pc80_map_tsv, sep='\t', index=False)
@@ -484,7 +487,10 @@ def _parse_phrogs(row):
 
 
 def _parse_alandb(row):
-    return row['annot']
+    if pd.notna(row['annot']):
+        return row['annot']
+    else: 
+        return row['category']
 
      
 def _report_topology_for_group(group, mapping):
@@ -499,3 +505,42 @@ def _report_topology_for_group(group, mapping):
     # If no priority match was found but there are ECOD rows, return fallback
     return "other"
 
+
+def _get_max_bitscore_hit(group, nrows=1):
+    """Sort the group by 'bits' in descending order and return the top nrows."""
+    sorted_group = group.sort_values('bits', ascending=False)
+    return sorted_group.head(nrows)
+
+
+def _extract_x_level(report_full):
+    """
+    Given a function string in the format:
+    "{ecodID} | A: {A_LEVEL} | X: {X_LEVEL} | H: {H_LEVEL} | T: {T_LEVEL} | F: {F_LEVEL} | PROTEIN: {PROTEIN_LEVEL}"
+    extract and return the X_LEVEL value.
+    """
+    parts = report_full.split('|')
+    for part in parts:
+        part = part.strip()
+        if part.startswith("X:"):
+            # Split on "X:" and strip any whitespace to get the X_LEVEL value.
+            return part.split("X:")[1].strip()
+    return None
+
+
+def _report_unique_x_levels(group):
+    """
+    For a group with db 'ECOD', extract the X_LEVEL from the function column,
+    group by that level, and return the row with the highest bitscore for each X_LEVEL.
+    """
+    # Create a copy to avoid SettingWithCopyWarning.
+    group = group.copy()
+    
+    # Extract X_LEVEL into a new column.
+    group['X_level'] = group['function'].apply(_extract_x_level)
+    
+    best_hits = []
+    # Group by the extracted X_level and get the best hit in each subgroup.
+    for x_level, subgroup in group.groupby('X_level'):
+        best_hits.append(_get_max_bitscore_hit(subgroup, nrows=1))
+    # Combine the best hits for each unique X_level into one DataFrame.
+    return pd.concat(best_hits).drop(columns='X_level', errors='ignore')
