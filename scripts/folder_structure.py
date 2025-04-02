@@ -23,7 +23,7 @@ class FolderStructure:
 
         # mmseqs params
         mmseqs_dict = {'mmseqs_binary': "/opt/homebrew/bin/mmseqs",
-                    'min_identity': 0.0,
+                    'min_identity': 0.8,
                     'min_coverage': 0.8,
                     'max_evalue': 10**-3,
                     'sensitivity': 7.5,
@@ -67,11 +67,14 @@ class FolderStructure:
         colors_and_shapes_dict = {'ecod_colors': {'Pectin lyase-like': '#0E470E',
                                         'SGNH hydrolase': '#FFD700',
                                         'Concanavalin A-like': '#0000FF',
-                                        '6-bladed': '#E63900',
+                                        'x-bladed': '#E63900',
                                         'Alanine racemase-C': '#8A2BE2',
                                         'Intramolecular chaperone': '#4682B4', 
-                                        'other': '#A9A4A4', 'no hit': '#BDBDF8', 
-                                        '-':'#BDBDF8'},
+                                        'tail spike': '#00ffff',
+                                        'other': '#A9A4A4', 
+                                        'no hit': '#BDBDF8'
+                                        },
+                                          
                         'recombinant_depos_colors': {'lysogenic_zdk_produced_active': '#EF3B2C', 
                                                     'lysogenic_zdk_not_produced': '#BDBDBD',
                                                     'lysogenic_zdk_produced_inactive': '#FC9272',
@@ -227,17 +230,22 @@ class FolderStructure:
 
 
         # functions
-        functions_dir = Path(intermediate_dir, '3_FUNCTIONS', annotation_tool, mmseqs_version)
-        clusters_map = Path(functions_dir, 'clusters_map.tsv')
-        clusters_functions = Path(functions_dir, 'clusters_functions.tsv')
-        clusters_functions_best = Path(functions_dir, 'clusters_functions_best.tsv')
+        functions_dir = Path(intermediate_dir, '3_FUNCTIONS')        
 
+        versions_functions_dir = Path(functions_dir, annotation_tool, mmseqs_version)
+        clusters_map = Path(versions_functions_dir, 'clusters_map.tsv')
+        clusters_functions = Path(versions_functions_dir, 'clusters_functions.tsv')
+        clusters_functions_best = Path(versions_functions_dir, 'clusters_functions_best.tsv')
+        clusters_functions_best_all = Path(functions_dir, 'clusters_functions_best_all.tsv')
+        
         # dict
         functions_dict = {
                     "functions_dir": functions_dir,
+                    "versions_functions_dir": versions_functions_dir,
                     "clusters_map": clusters_map,
                     "clusters_functions": clusters_functions,
-                    "clusters_functions_best": clusters_functions_best
+                    "clusters_functions_best": clusters_functions_best,
+                    "clusters_functions_best_all": clusters_functions_best_all
                     }
 
 

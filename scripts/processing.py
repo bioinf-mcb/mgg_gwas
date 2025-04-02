@@ -30,6 +30,7 @@ class Processor:
         self.clusters_mmseqs = structure['mmseqs']['clusters']
         self.clusters_functions = structure['functions']['clusters_functions']
 
+
         # output
         self.pyseer_cols = ['PC', 'pvalue', 'beta', 'locus_nbootstrap', 'mode']
         self.metrics_cols = ['PC', 'locus_nbootstrap', 'TP', 'FN', 'TN', 'FP', 'precision', 'recall', 'specificity', 'accuracy', 'F1_score', 'MCC', 'TP_SC','FN_SC','TN_SC','FP_SC','precision_SC','recall_SC','specificity_SC','accuracy_SC','F1_score_SC', 'MCC_SC', 'PC_abundance', 'locus_abundance', 'PC_freq']
@@ -48,6 +49,9 @@ class Processor:
         # pyseer hits: aggregated
         self.pyseer_hits_final_table_all = structure['processed']['pyseer_hits_final_table_all']
         self.pyseer_hits_final_table_filtered = structure['processed']['pyseer_hits_final_table_filtered']
+
+        # functions: aggregated
+        self.clusters_functions_best_all = structure['functions']['clusters_functions_best_all'] 
 
 
     def concatenate_pyseer(self):
@@ -624,24 +628,32 @@ class Processor:
         glob_concat_versions_tables(versions_dir, pattern, outfile)
 
 
-    # def map_functions_topologies(self):
+    def aggregate_function_prediction(self):
+
+        def glob_concat_function_tables(versions_dir, pattern, outfile):
+
+            # load
+            dfs = []
+            for file in versions_dir.rglob(pattern):
+                df = pd.read_csv(file, sep='\t')
+                dfs.append(df)
+
+            # concatenate
+            concat_dfs = pd.concat(dfs)
+
+            # save
+            concat_dfs.to_csv(outfile, sep='\t', index=False)
+
+        ############################
+        #### ALL FUNCTIONS HITS ####
+        ############################
+
+        versions_dir = Path(self.clusters_functions).parent.parent
+        pattern = '*functions.tsv*'
+        outfile = self.clusters_functions_best_all
+        glob_concat_function_tables(versions_dir, pattern, outfile)
+
         
-    #     # paths
-    #     clusters_functions = self.structure['functions']['clusters_functions']
-
-    #     # load
-    #     clusters_functions_df = pd.read_csv(clusters_functions, sep='\t')
-
-    #     # map topologies
-    #     cols = ['PC', 'version', 'PC80', 'function', 'reported_topology_PC80', 'reported_topology_PC']
-    #     mapping_df = mapping_df[cols]
-    #     mapping_df['PC-version-PC80'] = mapping_df[['PC', 'version', 'PC80']].astype(str).agg('-'.join, axis=1)
-    #     mapping_df = mapping_df.drop_duplicates(['PC-version-PC80'])
-
-
-
-        
-
 
 def _safe_division(numerator, denominator):
     """

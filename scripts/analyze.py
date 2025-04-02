@@ -34,13 +34,13 @@ class AnalyzeResults:
 		self.recombinant_depos_table = structure['input_processed']['recombinant_depos_table']
 		self.prediction_depos_table = structure['input']['predictions_table']
 		self.phenotypes_matrix = structure['gwas']['phenotypes_matrix'] # alwasy the same
+		self.clusters_functions_best_all = structure['functions']['clusters_functions_best_all']
 		self.pyseer_hits_table = structure['processed']['pyseer_hits_final_table_filtered']
 		self.mmseqs_dir = structure['mmseqs']['mmseqs_dir'].parent
 
 		self.per_locus_dir = structure['analyze']['per_locus_dir']
 		self.aggregated_data_dir = structure['analyze']['aggregated_data_dir']
 		self.predictions_and_enzymes_table = structure['analyze']['predictions_and_enzymes_table']
-
 
 
 	def aggregate_data(self, run=True):
@@ -56,6 +56,13 @@ class AnalyzeResults:
 
 		# symlink directories with input tables
 		symlink_directories(src_dir, dst_dir, retain_structure=True)
+
+
+		# symlink functions prediciton
+		src = self.structure['functions']['clusters_functions_best_all']
+		fname = Path(src).name
+		dst = Path(self.aggregated_data_dir, fname)
+		create_symlink(src, dst)
 
 
 		# symlink pyseer files
@@ -79,23 +86,27 @@ class AnalyzeResults:
 
 		# load
 		pyseer_hits = pd.read_csv(self.pyseer_hits_table, sep='\t')
+		functions_df = pd.read_csv(self.clusters_functions_best_all, sep='\t')
+
+		# map topologies 
+		pyseer_hits = self._map_functions(pyseer_hits, functions_df)
 
 
-		#################
-		#### TESTING ####
-		#################
+		# #################
+		# #### TESTING ####
+		# #################
 
-		# params
-		# testing_loci = ['KL3', 'KL7', 'KL64']
+		# # params
+		# testing_loci = ['KL3']#, 'KL7', 'KL64']
 		# printing_testing_loci = ' '.join(testing_loci)
 		# tqdm.write(f'Select capsules for testing: {printing_testing_loci}')
 
 		# filt_test = (pyseer_hits['locus'].isin(testing_loci))
 		# pyseer_hits = pyseer_hits.loc[filt_test].reset_index(drop=True)
 
-		#################
-		#### TESTING ####
-		#################
+		# #################
+		# #### TESTING ####
+		# #################
 
 
 		## per K locus alignments and phandango
@@ -126,9 +137,22 @@ class AnalyzeResults:
 		groups = pyseer_hits.groupby(['mode', 'locus'])
 		for (mode, locus), group in groups:
 			output_pdf = Path(self.per_locus_dir, locus, mode) / f'{locus}_{mode}.pdf'
-			print(output_pdf)
 			self._plot_recall_precision_with_ci_per_kl(mode_locus_df=group, output_pdf=output_pdf)
-			break
+
+
+	def _map_functions(self, pyseer_hits, functions_df):
+
+		# process functions
+		func_cols = ['PC', 'version', 'reported_topology_PC']
+		functions_df = functions_df[func_cols].rename({'reported_topology_PC': 'reported_topology'}, axis=1)
+		functions_df['PC-version'] = functions_df[['PC', 'version']].astype(str).agg('-'.join, axis=1)
+		functions_df = functions_df.drop_duplicates('PC-version')
+		functions_df = functions_df.drop('PC-version', axis=1)
+
+		# map
+		pyseer_hits = pyseer_hits.merge(functions_df, on=['PC','version'], how='left')
+
+		return pyseer_hits
 
 
 	def _get_subtree(self, version, mode, locus, variants_df, max_leaves=300, outgroup='398KBV'):
@@ -185,6 +209,7 @@ class AnalyzeResults:
 
 	def _get_variants_table(self, version, mode, locus, group):
 		
+
 		# paths
 		variants_table = Path(self.mmseqs_dir) / f'{version}/3_binary_matrix.tsv'
 		output_dir = Path(self.per_locus_dir) / f'{locus}/{mode}/phandango/{version}'
@@ -200,9 +225,9 @@ class AnalyzeResults:
 		map_colours = {'phenotype': '#273746', 'PC': '#5DADE2', 'other': '#FDFEFE'}
 
 		# load files
-		# pyseer_hits = pd.read_csv(self.pyseer_hits_table, sep='\t')
 		phenotypes_matrix_df = pd.read_csv(self.phenotypes_matrix, sep='\t')
 		variants_df = pd.read_csv(variants_table, sep='\t')
+
 
 		# convert phenotype matrix
 		new_cols_dict = {col: col.split('_0')[0] for col in list(phenotypes_matrix_df.columns) if '_0' in col}
@@ -219,11 +244,16 @@ class AnalyzeResults:
 			order_reported_topology = self.ecod_colors.keys()
 			df['reported_topology'] = pd.Categorical(df['reported_topology'], categories=order_reported_topology, ordered=True)
 			df_sorted = df.sort_values(by=['reported_topology', 'precision'], ascending=[True, True])
-			return list(df_sorted['PC'].unique())
+
+			# pcs
+			all_pcs_sorted = list(df_sorted['PC'].unique())
+			pcs_with_pl = list(df_sorted.query('reported_topology == "Pectin lyase-like" or reported_topology == "Alanine racemase-C"')['PC'].unique())
+
+			return all_pcs_sorted, pcs_with_pl
 
 		
 		# select variants
-		variants = get_sorted_variants(group)
+		variants, variants_with_pl = get_sorted_variants(group)
 		variants_cols = ['genomeID'] + variants
 		variants_df = variants_df[variants_cols]
 
@@ -269,6 +299,13 @@ class AnalyzeResults:
 			cols = [locus] + frag_variants + [f'{locus}:colour'] + frag_variants_colour
 			df[cols].to_csv(outfile, sep='\t')
 
+
+		# only pectin lyase pcs
+		outfile = Path(outdir, f'PECTIN_LYASE.{extension}')
+		variants_with_pl_colour = [f'{col}:colour' for col in variants_with_pl]
+		cols = [locus] + variants_with_pl + [f'{locus}:colour'] + variants_with_pl_colour
+		df[cols].to_csv(outfile, sep='\t')
+
 		return df
 
 			
@@ -293,7 +330,7 @@ class AnalyzeResults:
 			create_symlink(src, dst)
 
 
-	def _plot_recall_precision_with_ci_per_kl(self, mode_locus_df, output_pdf):
+	def _plot_recall_precision_with_ci_per_kl(self, mode_locus_df, output_pdf, ecod_to_color = ['Alanine racemase-C', 'Pectin lyase-like', 'other', 'no hit']):
 		"""
 		Create a PDF with 12 subplots (4 rows x 3 columns).
 		"""
@@ -303,13 +340,33 @@ class AnalyzeResults:
 		from matplotlib.backends.backend_pdf import PdfPages
 		import numpy as np
 		from adjustText import adjust_text
+		from matplotlib.patches import Patch
+
+
+		# cosmetics
+		point_labels_fontsize = 4
+		labels_fontsize = 7
+		big_labels_fontsize = 10
+		figsize=(6,6)
+
+		# legend
+		legend_loc = 'center'
+		legend_bbox = (0.85, 0) # 0.7, -0.05
+		legend_ncols = 1
 
 		# params
 		mode = mode_locus_df['mode'].unique()[0]
 		locus = mode_locus_df['locus'].unique()[0]
 
+		mask_ecod_colors = {}
+		for k,v in self.ecod_colors.items():
+			if k in ecod_to_color:
+				mask_ecod_colors[k] = self.ecod_colors[k]
+			else: 
+				mask_ecod_colors[k] = self.ecod_colors['other']
+
 		# Initialize figure with 4 rows x 3 columns
-		fig, axes = plt.subplots(4, 3, figsize=(10, 12), sharex=True, sharey=True)
+		fig, axes = plt.subplots(4, 3, figsize=figsize, sharex=True, sharey=True)
 
 		# Assumed identity and coverage values
 		identity_list = ['00', '50', '80']
@@ -349,8 +406,9 @@ class AnalyzeResults:
 
 					for _, row in subdf.iterrows():
 						rep_top = row['reported_topology']
-						color = self.ecod_colors.get(rep_top, 'black')
-
+						color = mask_ecod_colors.get(rep_top, 'black')
+						
+						zorder = 3 if rep_top == 'Pectin lyase-like' else 1
 						jitter_x = np.random.uniform(-0.02, 0.02)
 						jitter_y = np.random.uniform(-0.02, 0.02)
 
@@ -373,16 +431,18 @@ class AnalyzeResults:
 							markersize=6,
 							ecolor=color,
 							capsize=2,
-							alpha=0.75
+							alpha=0.75,
+							zorder=zorder
 						)
 
 						if mode == 'elastic_net':
-							if row[precision_ci_low] >= self.min_precision or row[recall_ci_low] >= self.min_recall:
-								txt = ax.text(x, y, row['PC'], fontsize=6, color='#FF7074')
+							if row[precision_col] >= self.min_precision or row[recall_col] >= self.min_recall:
+								txt = ax.text(x, y, row['PC'], fontsize=point_labels_fontsize, color='#FF7074', weight='bold')
 								texts.append(txt)
 						else: 
-							txt = ax.text(x, y, row['PC'], fontsize=6, color='#FF7074')
-							texts.append(txt)
+							if row[precision_col] >= self.min_precision or row[recall_col] >= self.min_recall:
+								txt = ax.text(x, y, row['PC'], fontsize=point_labels_fontsize, color='#FF7074', weight='bold')
+								texts.append(txt)
 
 					ax.axvline(x=self.min_precision, color='red', linestyle='--', linewidth=1, alpha=0.2)
 					ax.axvline(x=self.high_precision, color='gray', linestyle='--', linewidth=1, alpha=0.2)
@@ -391,25 +451,15 @@ class AnalyzeResults:
 					ax.set_xlim(-0.05, 1.05)
 					ax.set_ylim(-0.05, 1.05)
 
-					if i + row_offset == 3:
-						ax.set_xlabel('Precision')
-					else:
-						ax.set_xlabel('')
-
-					if j == 0:
-						ax.set_ylabel('Recall', labelpad=20)
-					else:
-						ax.set_ylabel('')
-
 					adjust_text(texts, ax=ax, expand=(1.2, 1.5), arrowprops=dict(arrowstyle='-', color='gray', lw=0.5))
 
 			row_center_y = (axes[row_offset, 0].get_position().y0 + axes[row_offset + 1, 0].get_position().y1) / 2
-			fig.text(0.05, row_center_y, config["label"], ha='center', va='center', fontsize=12, fontweight='bold', rotation=90)
+			fig.text(0.04, row_center_y, config["label"], ha='center', va='center', fontsize=big_labels_fontsize, fontweight='bold', rotation=90)
 
 		# Align identity labels at the top of each column
 		for j, identity in enumerate(identity_list):
 			col_center_x = axes[0, j].get_position().x0 + axes[0, j].get_position().width / 2
-			fig.text(col_center_x, 0.9, f"Identity: {identity}", ha='center', va='bottom', fontsize=12)
+			fig.text(col_center_x, 0.9, f"Identity: {identity}", ha='center', va='bottom', fontsize=labels_fontsize)
 
 		# Align coverage labels to the right of each row
 		for config in configs:
@@ -417,15 +467,29 @@ class AnalyzeResults:
 			for i, coverage in enumerate(coverage_list):
 				row_index = i + row_offset
 				row_center_y = axes[row_index, -1].get_position().y0 + axes[row_index, -1].get_position().height / 2
-				fig.text(0.93, row_center_y, f"Coverage: {coverage}", ha='left', va='center', fontsize=12, rotation=90)
+				fig.text(0.93, row_center_y, f"Coverage: {coverage}", ha='left', va='center', fontsize=labels_fontsize, rotation=90)
+
+
+		# adjust ticks
+		for ax in axes.flatten():
+			ax.set_xticks([0, 0.5, 1])
+			ax.set_yticks([0, 0.5, 1])
+
+		fig.text(0.5, 0.06, 'Precision', ha='center', va='center', fontsize=labels_fontsize+1)
+		fig.text(0.06, 0.5, 'Recall', ha='center', va='center', rotation=90, fontsize=labels_fontsize+1)
+
+
+		legend_elements = [Patch(facecolor=color, label=label) for label, color in mask_ecod_colors.items() if label in ecod_to_color]
+		fig.legend(handles=legend_elements, loc=legend_loc, bbox_to_anchor=legend_bbox,
+		title="PCs topology prediction", fontsize=labels_fontsize, title_fontsize=labels_fontsize, ncol=legend_ncols)
 
 		# Adjust layout and margins
-		fig.subplots_adjust(left=0.15, right=0.9, top=0.88, bottom=0.12, hspace=0.3, wspace=0.2)
-
-		fig.suptitle(f"{locus} {mode}", fontsize=16)
+		fig.subplots_adjust(left=0.15, right=0.9, top=0.88, bottom=0.12, hspace=0.1, wspace=0.1)
+		title = f'Precision and recall calculated on isolates and SCs \nfor all PCs associated with {locus} from six clustering levels.\n'
+		fig.suptitle(title, fontsize=big_labels_fontsize-2, fontweight='bold')
 
 		with PdfPages(output_pdf) as pdf:
-			pdf.savefig(fig)
+			pdf.savefig(fig, bbox_inches='tight')
 
 		plt.close(fig)
 
