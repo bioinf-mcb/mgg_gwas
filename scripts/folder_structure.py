@@ -143,19 +143,20 @@ class FolderStructure:
 
         # INPUT DATA
         bacteria_dir = Path(input_dir, '1_BACTERIA')
-        prophages_dir = Path(input_dir, '2_PROPHAGES/PROPHAGES_EXT2KB/PROPHAGE_ANNOTATION_KPN_KVV_KQQ_KQS_CONF_HIGH_MEDIUM_LOW_COMPLETENESS_50_ANNOTATE_WITH_HHSEARCH/')
+        prophages_dir = Path(input_dir, '2_PROPHAGES')
+        gwas_dir = Path(input_dir, '3_GWAS')
 
-        bacteria_tsv = Path(bacteria_dir, 'bacteria.tsv')
+        bacteria_tsv = Path(bacteria_dir, 'bacteria_metadata.tsv')
         bacteria_tree_nwk = Path(bacteria_dir, 'bacteria_iqtree.nwk')
-        prophages_tsv = Path(prophages_dir, 'prophages.tsv')
+        prophages_tsv = Path(prophages_dir, 'prophages_metadata.tsv')
         pcs2proteins_tsv = Path(prophages_dir, 'pcs2proteins.tsv')
         search_tsv = Path(prophages_dir, 'raw_hhsuite.tsv')
         proteins_dir = Path(prophages_dir, '4_FASTA_CDS_AA')
         proteins_files = list(Path(proteins_dir).glob('*.faa'))
 
-        lytic_table = Path('/Users/januszkoszucki/MGG Dropbox/Projects/gwas/DEPOLYMERASES_RECOMBINANT/LITERATURE_SEARCH/2025-01-22_LITERATURE_SEARCH.tsv')
-        lysogenic_table = Path('/Users/januszkoszucki/MGG Dropbox/Projects/gwas/DEPOLYMERASES_RECOMBINANT/PROPHAGES/2025-03-21_PROPHAGE_DEPOLYMERASES.xlsx')
-        predictions_table = Path('/Users/januszkoszucki/MGG Dropbox/Projects/gwas/DEPOLYMERASES_PREDICTIONS/BEST_DEPO_HITS.xlsx')
+        lytic_table = Path(gwas_dir, 'DEPOLYMERASES_RECOMBINANT/LITERATURE_SEARCH/2025-01-22_LITERATURE_SEARCH.tsv')
+        lysogenic_table = Path(gwas_dir, 'DEPOLYMERASES_RECOMBINANT/PROPHAGES/2025-03-21_PROPHAGE_DEPOLYMERASES.xlsx')
+        predictions_table = Path(gwas_dir, 'DEPOLYMERASES_PREDICTIONS/BEST_DEPO_HITS.xlsx')
 
 
         # dict
@@ -353,16 +354,23 @@ class FolderStructure:
 
         ## figures
         figures_dir = Path(output_dir, '5_FIGURES')
-        FIG4A = Path(figures_dir, 'FIG4A.pdf')
-        FIG4B_NODES = Path(figures_dir, 'FIG4B_NODES.tsv')
-        FIG4B_EDGES = Path(figures_dir, 'FIG4B_EDGES.tsv')
+        figure4_dir = Path(figures_dir, 'FIG4')
+        figure4B_dir = Path(figures_dir, 'FIG4', 'FIG4B')
         tmp_blast_dir = '/Users/januszkoszucki/tmp_blast_dir'
 
+        FIG4A = Path(figure4_dir, 'FIG4A.pdf')
+        FIG4B_NODES = Path(figure4B_dir, 'FIG4B_NODES.tsv')
+        FIG4B_EDGES = Path(figure4B_dir, 'FIG4B_EDGES.tsv')
+        FIG4C = Path(figure4_dir, 'FIG4C.pdf')
+        
         # figures dict 
         figures_dict = {"figures_dir": figures_dir,
+                        "figure4_dir": figure4_dir,
+                        "figure4B_dir": figure4B_dir,
                         "FIG4A": FIG4A,
                         "FIG4B_NODES": FIG4B_NODES,
                         "FIG4B_EDGES": FIG4B_EDGES,
+                        "FIG4C": FIG4C,
                         "tmp_blast_dir": tmp_blast_dir
                         } 
 

@@ -542,7 +542,6 @@ class AnalyzeResults:
 		prediction_df = prediction_df[prediction_cols].rename({'locus': 'specificity', 'PC': 'proteinID'}, axis=1)
 		prediction_df = prediction_df.dropna()
 		prediction_df['source'] = 'PREDICTION'
-		prediction_df['prediction_strength'] = prediction_df['prediction_strength'].replace({'good': 'yes', 'likely': 'maybe (+)'})
 
 
 		# concat
