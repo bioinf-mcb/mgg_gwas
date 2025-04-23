@@ -1,431 +1,382 @@
-
-def get_k_loci(structure, params):
-
-    import pandas as pd
-
-    # Retrieve file paths and parameters.
-    custom_gwas_kloci = params['gwas']['phenotypes']
-    bacteria_table = structure['input_processed']['bacteria_tsv']
-    predictions_and_enzymes = structure['analyze']['predictions_and_enzymes_table']
-    output_pdf_path = structure['figures']['FIG4A']
-    
-    # Read input tables.
-    bacteria_df = pd.read_csv(bacteria_table, sep='\t')
-    predictions_and_enzymes_df = pd.read_csv(predictions_and_enzymes, sep='\t')
-
-
-    # Filter rows based on the source.
-    zdk_df = predictions_and_enzymes_df.query('source == "PROPHAGE_ZDKLAB"')
-    lytic_df = predictions_and_enzymes_df.query('source == "LITERATURE_SEARCH"')
-    predicted_df = predictions_and_enzymes_df.query('source == "PREDICTION"')
-
-    zdk_specificity = zdk_df['specificity'].unique()
-    zdk_host = zdk_df['K_locus_host'].unique()
-    literature = lytic_df['specificity'].unique()
-
-    k_loci_dict = {'gwas': custom_gwas_kloci,
-                    'zdk_specificity': zdk_specificity,
-                    'zdk_hosts': zdk_host,
-                    'literature': literature}
-
-    return k_loci_dict
-
-
-def FIGURE4_PANELA(structure, params, merge_expr=True, cell_number_color="#000000", 
-                   target_fig_height=3.5, target_fig_width=8, labels_fontsize=6, cells_fontsize=4, 
-                   margin=0.3, header_space=0.1):
+def FIGURE4_PANELA(structure, params, cell_number_color="#000000"):
     """
-    Generates FIG4 PANEL A visualization with an extra final row for LITERATURE_SEARCH DEPOLYMERASES.
-    
-    In the non-merged version, the rows are:
-      0. KASPAH_REF isolates
-      1. GWAS_KSC counts
-      2. Tested expressed proteinsnota
-      3. Tested not expressed proteins
-      4. Predicted proteins
-      5. LITERATURE_SEARCH DEPOLYMERASES
+    Revised FIGURE4_PANELA visualization that:
+      - Uses the provided layout configuration,
+      - Plots only the union of K loci coming from:
+           (i) unique KASPAH_REF,
+           (ii) custom GWAS K loci,
+           (iii) unique PROPHAGE active/inactive (after splitting dual specificities),
+           (iv) unique lytic phage depolymerases (after splitting dual specificities),
+           (v) unique GENSCRIPT active/inactive (after splitting dual specificities).
+      - Skips NOT_PRODUCED proteins,
+      - Draws split cells only when both active and inactive counts are present,
+      - And for "# Kp complex SCs" colors only cells with values ≥ 10 (values less than 10 are white).
       
-    In the merged version, the rows are:
-      0. KASPAH_REF isolates
-      1. GWAS_KSC counts
-      2. Tested proteins (merged expressed)
-      3. Predicted proteins
-      4. LITERATURE_SEARCH DEPOLYMERASES
+    New features controlled by parameters:
+      1. remove_kn_kloci: Remove any K locus that starts with "KN" from the plot.
+      2. remove_inactive: Remove inactive protein counts for PROPHAGE and GENSCRIPT rows.
+      
+    Row order (merged version with subcells) is:
+      Row 0: "KASPAH-REF isolates" 
+      Row 1: "Sequence Clusters (SCs)"
+      Row 2: "active proteins based on GWAS prediction"  (prediction row)
+      Row 3: "active proteins based on manual prediction"  (split: PROPHAGE active/inactive, but inactive removed if flag is True)
+      Row 4: "genscript proteins"                        (split: GENSCRIPT active/inactive, but inactive removed if flag is True)
+      Row 5: "lytic proteins"
     """
+
     import os
     import pandas as pd
+    import matplotlib as mpl
     import matplotlib.pyplot as plt
     import matplotlib.patches as patches
     import re
 
 
-    def generate_pdf_visualization(data, output_pdf_path, custom_gwas_kloci, merge_expr=True, 
-                                   cell_number_color="#000000", target_fig_height=3.5, target_fig_width=8, 
-                                   labels_fontsize=6, cells_fontsize=4, margin=0.3, header_space=0.1):
-
-        def sort_key(key):
-            # Extract the two-letter prefix (if available)
-            prefix = key[:2]
-            # Define the order: "KL" should come before "KN"; all others get a higher value.
-            if prefix == "KL":
-                prefix_order = 0
-            elif prefix == "KN":
-                prefix_order = 1
-            else:
-                prefix_order = 2
-            # Extract the numeric portion from the key.
-            match = re.search(r'\d+', key)
-            num = int(match.group()) if match else float('inf')
-            return (prefix_order, num)
+    mpl.rcParams['font.family'] = 'Arial'
+    mpl.rcParams['pdf.fonttype'] = 42
+    mpl.rcParams['ps.fonttype'] = 42
 
 
-        # Set number of rows and row labels based on merge_expr flag.
-        if merge_expr:
-            num_rows = 5
-            row_labels = [
-                "# kaspah ref isolates", 
-                "# Kp complex SCs", 
-                "Tested proteins", 
-                "Predicted proteins",
-                "Literature search proteins"
-            ]
-        else:
-            num_rows = 6
-            row_labels = [
-                "# kaspah ref isolates", 
-                "# Kp complex SCs", 
-                "Tested expressed proteins", 
-                "Tested not expressed proteins", 
-                "Predicted proteins",
-                "Literature search proteins"
-            ]
-        
-        # Ensure every K locus from the custom list is in data.
-        for kl in custom_gwas_kloci:
-            if kl not in data:
-                data[kl] = {
-                    "KASPAH_REF": 0,
-                    "GWAS_KSC": 0,
-                    "EXPRESSED": {
-                        "ACTIVE": 0,
-                        "INACTIVE": 0,
-                        "NOT_PRODUCED": 0
-                    },
-                    "PREDICTION": {},
-                    "LITERATURE_SEARCH_DEPOLYMERASES": 0
-                }
-        
-        # Sort keys (e.g. KL1, KL2, …)
-        sorted_keys = sorted(data.keys(), key=sort_key)
-        num_cols = len(sorted_keys)
 
-        # Adjust cell_width based on target_fig_width.
-        cell_width = (target_fig_width - 2 * margin) / num_cols
-        cell_height = (target_fig_height - 2 * margin) / num_rows
-        fig_width = target_fig_width
-        fig_height = target_fig_height
-        
-        fig, ax = plt.subplots(figsize=(fig_width, fig_height))
-        ax.set_xlim(0, fig_width)
-        ax.set_ylim(0, fig_height)
-        ax.axis('off')
-        
-        # Draw column headers (K locus labels).
-        header_y = fig_height - margin + header_space
-        for i, k_locus in enumerate(sorted_keys):
-            x = margin + i * cell_width + cell_width / 2
-            ax.text(x, header_y, k_locus, ha='center', va='bottom',
-                    fontsize=labels_fontsize, fontweight='bold', rotation=60)
-        
-        # Define color mapping.
-        color_mapping = {
-            "KASPAH_REF": "#f06c6c",
-            "ACTIVE": "#fa61bd",
-            "INACTIVE": "#f5bfe0",
-            "NOT_PRODUCED": "#D0D0D0",
-            "GWAS_KSC": "#FFBD4D",
-            "PREDICTION_PERFECT": "#85C187",
-            "PREDICTION_GOOD": "#DBEFDC",
-            "LITERATURE_SEARCH_DEPOLYMERASES": "#bc96d9"
-        }
-        
-        for row in range(num_rows):
-            for col, k_locus in enumerate(sorted_keys):
-                x = margin + col * cell_width
-                y = margin + (num_rows - 1 - row) * cell_height
-                
-                # Row 0: KASPAH_REF isolates.
-                if row == 0:
-                    count = data[k_locus].get("KASPAH_REF", 0)
-                    cell_color = color_mapping["KASPAH_REF"] if count > 0 else "white"
-                    rect = patches.Rectangle((x, y), cell_width, cell_height,
-                                             facecolor=cell_color, edgecolor="black")
-                    ax.add_patch(rect)
-                    if count:
-                        ax.text(x + cell_width/2, y + cell_height/2, str(count),
-                                ha='center', va='center', color=cell_number_color,
-                                fontsize=cells_fontsize, fontweight='bold')
-                
-                # Row 1: GWAS_KSC counts.
-                elif row == 1:
-                    count = data[k_locus].get("GWAS_KSC", 0)
-                    cell_color = color_mapping["GWAS_KSC"] if (k_locus in custom_gwas_kloci and count > 0) else "white"
-                    rect = patches.Rectangle((x, y), cell_width, cell_height,
-                                             facecolor=cell_color, edgecolor="black")
-                    ax.add_patch(rect)
-                    if count:
-                        ax.text(x + cell_width/2, y + cell_height/2, str(count),
-                                ha='center', va='center', color=cell_number_color,
-                                fontsize=cells_fontsize, fontweight='bold')
-                
-                # Expressed / Not Produced proteins row(s)
-                if merge_expr:
-                    # Merged version: row 2.
-                    if row == 2:
-                        expr = data[k_locus].get("EXPRESSED", {})
-                        active_count = expr.get("ACTIVE", 0)
-                        inactive_count = expr.get("INACTIVE", 0)
-                        not_prod_count = expr.get("NOT_PRODUCED", 0)
-                        num_categories = sum(1 for c in [active_count, inactive_count, not_prod_count] if c > 0)
-                        if num_categories <= 1:
-                            if active_count > 0:
-                                cell_color = color_mapping["ACTIVE"]
-                                count = active_count
-                            elif inactive_count > 0:
-                                cell_color = color_mapping["INACTIVE"]
-                                count = inactive_count
-                            elif not_prod_count > 0:
-                                cell_color = color_mapping["NOT_PRODUCED"]
-                                count = not_prod_count
-                            else:
-                                cell_color = "white"
-                                count = 0
-                            rect = patches.Rectangle((x, y), cell_width, cell_height,
-                                                     facecolor=cell_color, edgecolor="black")
-                            ax.add_patch(rect)
-                            if count:
-                                ax.text(x + cell_width/2, y + cell_height/2, str(count),
-                                        ha='center', va='center', color=cell_number_color,
-                                        fontsize=cells_fontsize, fontweight='bold')
-                        else:
-                            # More than one category present.
-                            produced = []
-                            if active_count > 0:
-                                produced.append(("ACTIVE", active_count))
-                            if inactive_count > 0:
-                                produced.append(("INACTIVE", inactive_count))
-                            np_present = (not_prod_count > 0)
-                            num_subcells = len(produced) + (1 if np_present else 0)
-                            subcell_width = cell_width / num_subcells
-                            # Draw produced subcells on the left.
-                            for i, (cat, count) in enumerate(produced):
-                                sub_x = x + i * subcell_width
-                                sub_color = color_mapping[cat]
-                                sub_rect = patches.Rectangle((sub_x, y), subcell_width, cell_height,
-                                                             facecolor=sub_color, edgecolor="black")
-                                ax.add_patch(sub_rect)
-                                ax.text(sub_x + subcell_width/2, y + cell_height/2, str(count),
-                                        ha='center', va='center', color=cell_number_color,
-                                        fontsize=cells_fontsize, fontweight='bold')
-                            # Draw NOT_PRODUCED subcell on the right if present.
-                            if np_present:
-                                sub_x = x + len(produced) * subcell_width
-                                sub_color = color_mapping["NOT_PRODUCED"]
-                                sub_rect = patches.Rectangle((sub_x, y), subcell_width, cell_height,
-                                                             facecolor=sub_color, edgecolor="black")
-                                ax.add_patch(sub_rect)
-                                ax.text(sub_x + subcell_width/2, y + cell_height/2, str(not_prod_count),
-                                        ha='center', va='center', color=cell_number_color,
-                                        fontsize=cells_fontsize, fontweight='bold')
-                else:
-                    # Not merged version: separate rows.
-                    if row == 2:
-                        # Row 2: Expressed proteins (only ACTIVE and INACTIVE).
-                        expr = data[k_locus].get("EXPRESSED", {})
-                        active_count = expr.get("ACTIVE", 0)
-                        inactive_count = expr.get("INACTIVE", 0)
-                        num_categories = sum(1 for c in [active_count, inactive_count] if c > 0)
-                        if num_categories <= 1:
-                            if active_count > 0:
-                                cell_color = color_mapping["ACTIVE"]
-                                count = active_count
-                            elif inactive_count > 0:
-                                cell_color = color_mapping["INACTIVE"]
-                                count = inactive_count
-                            else:
-                                cell_color = "white"
-                                count = 0
-                            rect = patches.Rectangle((x, y), cell_width, cell_height,
-                                                     facecolor=cell_color, edgecolor="black")
-                            ax.add_patch(rect)
-                            if count:
-                                ax.text(x + cell_width/2, y + cell_height/2, str(count),
-                                        ha='center', va='center', color=cell_number_color,
-                                        fontsize=cells_fontsize, fontweight='bold')
-                        else:
-                            subcell_width = cell_width / 2
-                            for i, (cat, count) in enumerate([("ACTIVE", active_count), ("INACTIVE", inactive_count)]):
-                                if count:
-                                    sub_x = x + i * subcell_width
-                                    sub_color = color_mapping[cat]
-                                    sub_rect = patches.Rectangle((sub_x, y), subcell_width, cell_height,
-                                                                 facecolor=sub_color, edgecolor="black")
-                                    ax.add_patch(sub_rect)
-                                    ax.text(sub_x + subcell_width/2, y + cell_height/2, str(count),
-                                            ha='center', va='center', color=cell_number_color,
-                                            fontsize=cells_fontsize, fontweight='bold')
-                    if not merge_expr and row == 3:
-                        # Row 3: Not produced proteins.
-                        expr = data[k_locus].get("EXPRESSED", {})
-                        count = expr.get("NOT_PRODUCED", 0)
-                        cell_color = color_mapping["NOT_PRODUCED"] if count > 0 else "white"
-                        rect = patches.Rectangle((x, y), cell_width, cell_height,
-                                                 facecolor=cell_color, edgecolor="black")
-                        ax.add_patch(rect)
-                        if count:
-                            ax.text(x + cell_width/2, y + cell_height/2, str(count),
-                                    ha='center', va='center', color=cell_number_color,
-                                    fontsize=cells_fontsize, fontweight='bold')
-                
-                # Prediction row.
-                if (merge_expr and row == 3) or (not merge_expr and row == 4):
-                    pred_counts = data[k_locus].get("PREDICTION", {})
-                    if not pred_counts:
-                        rect = patches.Rectangle((x, y), cell_width, cell_height,
-                                                 facecolor="white", edgecolor="black")
-                        ax.add_patch(rect)
-                    elif len(pred_counts) == 1:
-                        pred_strength, count = list(pred_counts.items())[0]
-                        mapped_category = "PREDICTION_PERFECT" if pred_strength.lower() == "yes" else "PREDICTION_GOOD"
-                        cell_color = color_mapping[mapped_category]
-                        rect = patches.Rectangle((x, y), cell_width, cell_height,
-                                                 facecolor=cell_color, edgecolor="black")
-                        ax.add_patch(rect)
-                        ax.text(x + cell_width/2, y + cell_height/2, str(count),
-                                ha='center', va='center', color=cell_number_color,
-                                fontsize=cells_fontsize, fontweight='bold')
-                    else:
-                        n_categories = len(pred_counts)
-                        subcell_width = cell_width / n_categories
-                        sorted_pred = sorted(pred_counts.items(), key=lambda x: 0 if x[0].lower() == "yes" else 1)
-                        for i, (pred_strength, count) in enumerate(sorted_pred):
-                            mapped_category = "PREDICTION_PERFECT" if pred_strength.lower() == "yes" else "PREDICTION_GOOD"
-                            sub_x = x + i * subcell_width
-                            sub_rect = patches.Rectangle((sub_x, y), subcell_width, cell_height,
-                                                         facecolor=color_mapping[mapped_category],
-                                                         edgecolor="black")
-                            ax.add_patch(sub_rect)
-                            ax.text(sub_x + subcell_width/2, y + cell_height/2, str(count),
-                                    ha='center', va='center', color=cell_number_color,
-                                    fontsize=cells_fontsize, fontweight='bold')
-                
-                # Final row: LITERATURE_SEARCH DEPOLYMERASES.
-                if (merge_expr and row == 4) or (not merge_expr and row == 5):
-                    count = data[k_locus].get("LITERATURE_SEARCH_DEPOLYMERASES", 0)
-                    cell_color = color_mapping["LITERATURE_SEARCH_DEPOLYMERASES"] if count > 0 else "white"
-                    rect = patches.Rectangle((x, y), cell_width, cell_height,
-                                             facecolor=cell_color, edgecolor="black")
-                    ax.add_patch(rect)
-                    if count:
-                        ax.text(x + cell_width/2, y + cell_height/2, str(count),
-                                ha='center', va='center', color=cell_number_color,
-                                fontsize=cells_fontsize, fontweight='bold')
-        
-        # Draw row labels.
-        for r in range(num_rows):
-            y = margin + (num_rows - 1 - r) * cell_height + cell_height/2
-            ax.text(margin - 0.2, y, row_labels[r], ha='right', va='center',
-                    fontsize=labels_fontsize, fontweight='bold')
-        
-        plt.savefig(output_pdf_path, format='pdf', bbox_inches='tight')
-        plt.close(fig)
+    # ------------------------------------------------------------
+    # Feature control flags (set via parameters)
+    # ------------------------------------------------------------
+    # Set these in your params (default: True)
+    remove_kn_kloci = True
+    remove_inactive = True
+
+    # ------------------------------------------------------------
+    # Correction function: fix naming issues for K locus strings.
+    # ------------------------------------------------------------
+    def correct_k_locus(k):
+        corrections = {'K14': 'KL14', 'K3': 'KL3'}
+        return corrections.get(k, k)
+
+    # ------------------------------------------------------------
+    # Layout configuration (do not change these values)
+    # ------------------------------------------------------------
+    layout_config = {
+        "num_rows": 6,
+        "margin": 0.3,
+        "header_space": 0.1,
+        "labels_fontsize": 4,
+        "cells_fontsize": 3.5,
+        "target_fig_width": 7.5,
+        "target_fig_height": 1.4
+    }
+
+    # ------------------------------------------------------------
+    # Color configuration and row definitions.
+    # ------------------------------------------------------------
+    color_config = {
+        "KASPAH_REF": "#f06c6c",          # remains unchanged
+        "GWAS_KSC": "#FFBD4D",             # used if value ≥ 10
+        "PROPHAGE_ACTIVE": "#fa61bd",      # dark shade for active (PROPHAGE_ZDKLAB)
+        "PROPHAGE_INACTIVE": "#f5bfe0",     # light shade for inactive (PROPHAGE_ZDKLAB)
+        "PREDICTION_PERFECT": "#85C187",    # remains the same
+        "PREDICTION_GOOD": "#DBEFDC",       # remains the same
+        "LITERATURE_SEARCH": "#bc96d9",     # for lytic phage depolymerases
+        "GENSCRIPT_ACTIVE": "#4169E1",      # lighter blue for genscript active
+        "GENSCRIPT_INACTIVE": "#ADD8E6"      # light blue for genscript inactive
+    }
+
+    row_config = {
+        0: {"data_key": "KASPAH_REF", "label": "KASPAH-REF isolates", "plot_type": "single"},
+        1: {"data_key": "GWAS_KSC", "label": "Sequence Clusters (SCs)", "plot_type": "single"},
+        2: {"data_key": "PREDICTION", "label": "GWAS prediction", "plot_type": "prediction",
+            "categories": ["PREDICTION_PERFECT", "PREDICTION_GOOD"]},
+        3: {"data_key": "PROPHAGE", "label": "Active proteins based on manual prediction", "plot_type": "split",
+            "categories": ["ACTIVE", "INACTIVE"], "color_keys": ["PROPHAGE_ACTIVE", "PROPHAGE_INACTIVE"]},
+        4: {"data_key": "GENSCRIPT", "label": "Active based on GWAS prediction", "plot_type": "split",
+            "categories": ["ACTIVE", "INACTIVE"], "color_keys": ["GENSCRIPT_ACTIVE", "GENSCRIPT_INACTIVE"]},
+        5: {"data_key": "LITERATURE_SEARCH", "label": "Lytic proteins", "plot_type": "single"}
+    }
     
-    # Retrieve file paths and parameters.
+    # ------------------------------------------------------------
+    # Data Loading
+    # ------------------------------------------------------------
     custom_gwas_kloci = set(params['gwas']['phenotypes'])
     bacteria_table = structure['input_processed']['bacteria_tsv']
     predictions_and_enzymes = structure['analyze']['predictions_and_enzymes_table']
     output_pdf_path = structure['figures']['FIG4A']
-    
-    # Read input tables.
+
     bacteria_df = pd.read_csv(bacteria_table, sep='\t')
     predictions_and_enzymes_df = pd.read_csv(predictions_and_enzymes, sep='\t')
     
-    # Filter rows based on the source.
-    zdk_df = predictions_and_enzymes_df.query('source == "PROPHAGE_ZDKLAB"')
-    lytic_df = predictions_and_enzymes_df.query('source == "LITERATURE_SEARCH"')
+    # ------------------------------------------------------------
+    # Pre-processing: apply correction and dual-specificity splitting
+    # ------------------------------------------------------------
+    def process_dual_specificity(df):
+        if 'specificity' in df.columns:
+            df = df.copy()
+            df['assing_specificity'] = df.apply(
+                lambda row: [correct_k_locus(s.strip()) for s in row['specificity'].split('/')]
+                    if pd.notnull(row['specificity']) and "/" in row['specificity']
+                    else [correct_k_locus(row['assing_K_locus_host_when_specificity_missing'])],
+                axis=1)
+            df = df.explode('assing_specificity')
+        else:
+            df['assing_specificity'] = df['assing_K_locus_host_when_specificity_missing'].apply(correct_k_locus)
+        return df
+
+    # Define predicted_df, literature_df, prophage_df, and genscript_df properly.
     predicted_df = predictions_and_enzymes_df.query('source == "PREDICTION"')
+    predicted_df = process_dual_specificity(predicted_df)
     
-    # --- Process dual specificity for predicted proteins ---
-    if 'specificity' in predicted_df.columns:
-        predicted_df = predicted_df.copy()
-        predicted_df['assing_specificity'] = predicted_df.apply(
-            lambda row: [s.strip() for s in row['specificity'].split('/')]
-            if pd.notnull(row['specificity']) and "/" in row['specificity'] 
-            else [row['assing_K_locus_host_when_specificity_missing']],
-            axis=1)
-        predicted_df = predicted_df.explode('assing_specificity')
-    else:
-        predicted_df['assing_specificity'] = predicted_df['assing_K_locus_host_when_specificity_missing']
+    literature_df = predictions_and_enzymes_df.query('source == "LITERATURE_SEARCH"')
+    literature_df = process_dual_specificity(literature_df)
     
-    # --- Process dual specificity for literature search proteins ---
-    if 'specificity' in lytic_df.columns:
-        lytic_df = lytic_df.copy()
-        lytic_df['assing_specificity'] = lytic_df.apply(
-            lambda row: [s.strip() for s in row['specificity'].split('/')]
-            if pd.notnull(row['specificity']) and "/" in row['specificity'] 
-            else [row['assing_K_locus_host_when_specificity_missing']],
-            axis=1)
-        lytic_df = lytic_df.explode('assing_specificity')
-    else:
-        lytic_df['assing_specificity'] = lytic_df['assing_K_locus_host_when_specificity_missing']
+    prophage_df = predictions_and_enzymes_df.query('source == "PROPHAGE_ZDKLAB"')
+    prophage_df = process_dual_specificity(prophage_df)
     
-    # --- Generate counts for each category ---
-    kaspa_ref_series = pd.concat([zdk_df, predicted_df]).groupby('assing_K_locus_host_when_specificity_missing')["# KASPAH-REF"].first().fillna(0)
+    genscript_df = predictions_and_enzymes_df.query('source == "GENSCRIPT"')
+    genscript_df = process_dual_specificity(genscript_df)
     
+    # correct the K locus names in genscript if needed.
+    genscript_df["specificity"] = genscript_df["specificity"].apply(correct_k_locus)
+    
+    # ------------------------------------------------------------
+    # Compute counts for each category.
+    # ------------------------------------------------------------
+    # KASPAH_REF counts from PROPHAGE and PREDICTION datasets.
+    kaspa_ref_series = pd.concat([prophage_df, predicted_df])\
+                          .groupby('assing_specificity')["# KASPAH-REF"].first().fillna(0)
+    
+    # GWAS counts.
     gwas_series = bacteria_df.groupby("MGG_K_locus")["MGG_SC"].nunique().fillna(0)
     
-    active_series = zdk_df.query('expression == "PRODUCED" and activity == "ACTIVE"') \
-                            .groupby('assing_K_locus_host_when_specificity_missing').size().fillna(0)
+    # PROPHAGE overexpressed proteins: active and inactive.
+    prophage_active_series = prophage_df.query('expression == "PRODUCED" and activity == "ACTIVE"')\
+                                        .groupby('assing_specificity').size().fillna(0)
+    prophage_inactive_series = prophage_df.query('expression == "PRODUCED" and activity == "INACTIVE"')\
+                                          .groupby('assing_specificity').size().fillna(0)
     
-    inactive_series = zdk_df.query('expression == "PRODUCED" and activity == "INACTIVE"') \
-                              .groupby('assing_K_locus_host_when_specificity_missing').size().fillna(0)
-    
-    not_expressed_series = zdk_df.query('expression == "NOT_PRODUCED"') \
-                                  .groupby('assing_K_locus_host_when_specificity_missing').size().fillna(0)
-    
-    # Group predicted proteins by the (possibly exploded) specificity.
+    # Predicted proteins from predicted_df.
     predicted_group = predicted_df.groupby('assing_specificity')
-    
-    # Group literature search proteins by the (possibly exploded) specificity.
-    literature_depolymerases_series = lytic_df.groupby('assing_specificity').size().fillna(0)
-    
     predicted_dict = {}
     for kl, group in predicted_group:
         counts = group['prediction_strength'].value_counts().to_dict()
         predicted_dict[kl] = counts
     
-    all_kloci = set(kaspa_ref_series.index) | set(active_series.index) | set(custom_gwas_kloci) | \
-                set(inactive_series.index) | set(not_expressed_series.index) | set(predicted_dict.keys()) | \
-                set(literature_depolymerases_series.index)
+    # Lytic phage depolymerases counts.
+    literature_series = literature_df.groupby('assing_specificity').size().fillna(0)
     
+    # GENSCRIPT proteins: active and inactive.
+    genscript_active_series = genscript_df.query('expression == "PRODUCED" and activity == "ACTIVE"')\
+                                          .groupby('assing_specificity').size().fillna(0)
+    genscript_inactive_series = genscript_df.query('expression == "PRODUCED" and activity == "INACTIVE"')\
+                                            .groupby('assing_specificity').size().fillna(0)
+    
+    # ------------------------------------------------------------
+    # Build union of all K loci to plot.
+    # ------------------------------------------------------------
+    union_kloci = set(kaspa_ref_series.index) | set(custom_gwas_kloci) | \
+                  set(prophage_active_series.index) | set(prophage_inactive_series.index) | \
+                  set(literature_series.index) | \
+                  set(genscript_active_series.index) | set(genscript_inactive_series.index)
+    
+    # Feature 1: Remove any K locus that starts with "KN" if flag is True.
+    if remove_kn_kloci:
+        used_kloci = {kl for kl in union_kloci if not kl.startswith("KN")}
+    else:
+        used_kloci = union_kloci
+
+    # Build input data dictionary for each K locus.
     input_dict = {}
-    for kl in all_kloci:
+    for kl in used_kloci:
         input_dict[kl] = {
             "KASPAH_REF": int(kaspa_ref_series.get(kl, 0)),
             "GWAS_KSC": int(gwas_series.get(kl, 0)),
-            "EXPRESSED": {
-                "ACTIVE": int(active_series.get(kl, 0)),
-                "INACTIVE": int(inactive_series.get(kl, 0)),
-                "NOT_PRODUCED": int(not_expressed_series.get(kl, 0))
+            "PROPHAGE": {
+                "ACTIVE": int(prophage_active_series.get(kl, 0)),
+                "INACTIVE": int(prophage_inactive_series.get(kl, 0))
             },
             "PREDICTION": predicted_dict.get(kl, {}),
-            "LITERATURE_SEARCH_DEPOLYMERASES": int(literature_depolymerases_series.get(kl, 0))
+            "LITERATURE_SEARCH": int(literature_series.get(kl, 0)),
+            "GENSCRIPT": {
+                "ACTIVE": int(genscript_active_series.get(kl, 0)),
+                "INACTIVE": int(genscript_inactive_series.get(kl, 0))
+            }
         }
     
-    # Run the visualization.
-    generate_pdf_visualization(input_dict, output_pdf_path, custom_gwas_kloci=custom_gwas_kloci, merge_expr=merge_expr, 
-                               cell_number_color=cell_number_color, target_fig_height=target_fig_height, target_fig_width=target_fig_width, 
-                               labels_fontsize=labels_fontsize, cells_fontsize=cells_fontsize, margin=margin, header_space=header_space)
+    # Ensure every K locus from custom GWAS is present.
+    for kl in custom_gwas_kloci:
+        if kl not in input_dict:
+            input_dict[kl] = {
+                "KASPAH_REF": 0,
+                "GWAS_KSC": 0,
+                "PROPHAGE": {"ACTIVE": 0, "INACTIVE": 0},
+                "PREDICTION": {},
+                "LITERATURE_SEARCH": 0,
+                "GENSCRIPT": {"ACTIVE": 0, "INACTIVE": 0}
+            }
+    
+    # Feature 2: Remove inactive proteins for PROPHAGE and GENSCRIPT rows if flag is True.
+    if remove_inactive:
+        for kl in input_dict:
+            input_dict[kl]["PROPHAGE"]["INACTIVE"] = 0
+            input_dict[kl]["GENSCRIPT"]["INACTIVE"] = 0
+
+    # ------------------------------------------------------------
+    # Sort the K loci keys.
+    # ------------------------------------------------------------
+    def sort_key(key):
+        prefix = key[:2]
+        if prefix == "KL":
+            prefix_order = 0
+        elif prefix == "KN":
+            prefix_order = 1
+        else:
+            prefix_order = 2
+        match = re.search(r'\d+', key)
+        num = int(match.group()) if match else float('inf')
+        return (prefix_order, num)
+    
+    sorted_keys = sorted(input_dict.keys(), key=sort_key)
+    num_cols = len(sorted_keys)
+    
+    # ------------------------------------------------------------
+    # Figure layout settings from layout_config.
+    # ------------------------------------------------------------
+    margin = layout_config["margin"]
+    header_space = layout_config["header_space"]
+    target_fig_width = layout_config["target_fig_width"]
+    target_fig_height = layout_config["target_fig_height"]
+    labels_fontsize = layout_config["labels_fontsize"]
+    cells_fontsize = layout_config["cells_fontsize"]
+    num_rows = layout_config["num_rows"]
+    
+    cell_width = (target_fig_width - 2 * margin) / num_cols
+    cell_height = (target_fig_height - 2 * margin) / num_rows
+    
+    fig, ax = plt.subplots(figsize=(target_fig_width, target_fig_height))
+    ax.set_xlim(0, target_fig_width)
+    ax.set_ylim(0, target_fig_height)
+    ax.axis('off')
+    
+    # ------------------------------------------------------------
+    # Draw column headers (centered above each cell).
+    # ------------------------------------------------------------
+    header_y = target_fig_height - margin + header_space
+    for i, k_locus in enumerate(sorted_keys):
+        x = margin + i * cell_width + cell_width / 2
+        ax.text(x, header_y, k_locus, ha='center', va='bottom',
+                fontsize=labels_fontsize, fontweight='bold', rotation=60)
+    
+    # ------------------------------------------------------------
+    # Loop through rows (using row_config order) and columns.
+    # ------------------------------------------------------------
+    for row_index in range(num_rows):
+        config = row_config[row_index]
+        data_key = config["data_key"]
+        plot_type = config["plot_type"]
+        for col, k_locus in enumerate(sorted_keys):
+            x = margin + col * cell_width
+            y = margin + (num_rows - 1 - row_index) * cell_height
+            
+            cell_value = input_dict[k_locus].get(data_key, 0)
+            
+            if plot_type == "single":
+                count = cell_value
+                # Special handling for "# Kp complex SCs" (GWAS_KSC)
+                if data_key == "GWAS_KSC":
+                    cell_color = color_config.get(data_key, "white") if count >= 10 else "white"
+                else:
+                    cell_color = color_config.get(data_key, "white") if count > 0 else "white"
+                rect = patches.Rectangle((x, y), cell_width, cell_height,
+                                         facecolor=cell_color, edgecolor="black")
+                ax.add_patch(rect)
+
+                if count > 0:
+                    ax.text(x + cell_width/2, y + cell_height/2, str(count),
+                        ha='center', va='center', color=cell_number_color,
+                        fontsize=cells_fontsize, fontweight='bold')
+            
+            elif plot_type == "split":
+                cat_counts = cell_value
+                count_active = cat_counts.get("ACTIVE", 0)
+                count_inactive = cat_counts.get("INACTIVE", 0)
+                total = count_active + count_inactive
+                
+                if total == 0:
+                    rect = patches.Rectangle((x, y), cell_width, cell_height,
+                                             facecolor="white", edgecolor="black")
+                    ax.add_patch(rect)
+                elif (count_active > 0 and count_inactive == 0) or (count_inactive > 0 and count_active == 0):
+                    if count_active > 0:
+                        fill_color = color_config[config["color_keys"][0]]
+                        count = count_active
+                    else:
+                        fill_color = color_config[config["color_keys"][1]]
+                        count = count_inactive
+                    rect = patches.Rectangle((x, y), cell_width, cell_height,
+                                             facecolor=fill_color, edgecolor="black")
+                    ax.add_patch(rect)
+                    ax.text(x + cell_width/2, y + cell_height/2, str(count),
+                            ha='center', va='center', color=cell_number_color,
+                            fontsize=cells_fontsize, fontweight='bold')
+                else:
+                    subcell_width = cell_width / 2
+                    # Left subcell for ACTIVE
+                    sub_rect = patches.Rectangle((x, y), subcell_width, cell_height,
+                                                 facecolor=color_config[config["color_keys"][0]],
+                                                 edgecolor="black")
+                    ax.add_patch(sub_rect)
+                    ax.text(x + subcell_width/2, y + cell_height/2, str(count_active),
+                            ha='center', va='center', color=cell_number_color,
+                            fontsize=cells_fontsize, fontweight='bold')
+                    # Right subcell for INACTIVE
+                    sub_x = x + subcell_width
+                    sub_rect = patches.Rectangle((sub_x, y), subcell_width, cell_height,
+                                                 facecolor=color_config[config["color_keys"][1]],
+                                                 edgecolor="black")
+                    ax.add_patch(sub_rect)
+                    ax.text(sub_x + subcell_width/2, y + cell_height/2, str(count_inactive),
+                            ha='center', va='center', color=cell_number_color,
+                            fontsize=cells_fontsize, fontweight='bold')
+            
+            elif plot_type == "prediction":
+                pred_counts = cell_value
+                if not pred_counts:
+                    rect = patches.Rectangle((x, y), cell_width, cell_height,
+                                             facecolor="white", edgecolor="black")
+                    ax.add_patch(rect)
+                elif len(pred_counts) == 1:
+                    pred_category, count = list(pred_counts.items())[0]
+                    cell_color = color_config["PREDICTION_PERFECT"] if pred_category.lower() == "strong" else color_config["PREDICTION_GOOD"]
+                    rect = patches.Rectangle((x, y), cell_width, cell_height,
+                                             facecolor=cell_color, edgecolor="black")
+                    ax.add_patch(rect)
+                    ax.text(x + cell_width/2, y + cell_height/2, str(count),
+                            ha='center', va='center', color=cell_number_color,
+                            fontsize=cells_fontsize, fontweight='bold')
+                else:
+                    num_subcells = len(pred_counts)
+                    subcell_width = cell_width / num_subcells
+                    sorted_preds = sorted(pred_counts.items(), key=lambda x: 0 if x[0].lower() == "strong" else 1)
+                    for i, (pred_category, count) in enumerate(sorted_preds):
+                        sub_x = x + i * subcell_width
+                        mapped_category = "PREDICTION_PERFECT" if pred_category.lower() == "strong" else "PREDICTION_GOOD"
+                        sub_rect = patches.Rectangle((sub_x, y), subcell_width, cell_height,
+                                                     facecolor=color_config[mapped_category],
+                                                     edgecolor="black")
+                        ax.add_patch(sub_rect)
+                        ax.text(sub_x + subcell_width/2, y + cell_height/2, str(count),
+                                ha='center', va='center', color=cell_number_color,
+                                fontsize=cells_fontsize, fontweight='bold')
+    
+    # ------------------------------------------------------------
+    # Draw row labels (centered in each row).
+    # ------------------------------------------------------------
+    for row_index in range(num_rows):
+        config = row_config[row_index]
+        y = margin + (num_rows - 1 - row_index) * cell_height + cell_height/2
+        ax.text(margin - 0.2, y, config["label"], ha='right', va='center',
+                fontsize=labels_fontsize, fontweight='bold')
+    
+    plt.savefig(output_pdf_path, format='pdf', bbox_inches='tight')
+    plt.close(fig)
 
 
 def FIGURE4_PANELB(structure, params, min_cov=0.5, min_pident=0, max_evalue=1e-3, use_coverage=False):
@@ -639,9 +590,9 @@ def FIGURE4_PANELB(structure, params, min_cov=0.5, min_pident=0, max_evalue=1e-3
                     return "GENSCRIPT_INACTIVE"
             elif source == "PREDICTION":
                 ps = str(row.get('prediction_strength', ''))
-                if ps == "yes":
+                if ps == "strong":
                     return "PREDICTION_PERFECT"
-                elif ps == "maybe (+)":
+                elif ps == "likely":
                     return "PREDICTION_GOOD"
             return None
 
@@ -668,10 +619,11 @@ def FIGURE4_PANELB(structure, params, min_cov=0.5, min_pident=0, max_evalue=1e-3
         return df
 
     def get_label2(label):
-        if 'HOST' in label:
-            return '_'.join(label.split('_')[-2:])
-        else: 
-            return label.split('_')[-1]
+        return label.split('_')[-1]
+        # if 'HOST' in label:
+        #     return '_'.join(label.split('_')[-2:])
+        # else: 
+        #     return label.split('_')[-1]
 
     # paths
     predictions_and_enzymes = structure['analyze']['predictions_and_enzymes_table']
@@ -699,3 +651,229 @@ def FIGURE4_PANELB(structure, params, min_cov=0.5, min_pident=0, max_evalue=1e-3
                             intervals=[00, 50, 80])
 
 
+def get_k_loci(structure, params):
+
+    import pandas as pd
+
+    # Retrieve file paths and parameters.
+    custom_gwas_kloci = params['gwas']['phenotypes']
+    bacteria_table = structure['input_processed']['bacteria_tsv']
+    predictions_and_enzymes = structure['analyze']['predictions_and_enzymes_table']
+    output_pdf_path = structure['figures']['FIG4A']
+    
+    # Read input tables.
+    bacteria_df = pd.read_csv(bacteria_table, sep='\t')
+    predictions_and_enzymes_df = pd.read_csv(predictions_and_enzymes, sep='\t')
+
+
+    # Filter rows based on the source.
+    zdk_df = predictions_and_enzymes_df.query('source == "PROPHAGE_ZDKLAB"')
+    lytic_df = predictions_and_enzymes_df.query('source == "LITERATURE_SEARCH"')
+    predicted_df = predictions_and_enzymes_df.query('source == "PREDICTION"')
+
+    zdk_specificity = zdk_df['specificity'].unique()
+    zdk_host = zdk_df['K_locus_host'].unique()
+    literature = lytic_df['specificity'].unique()
+
+    k_loci_dict = {'gwas': custom_gwas_kloci,
+                    'zdk_specificity': zdk_specificity,
+                    'zdk_hosts': zdk_host,
+                    'literature': literature}
+
+    return k_loci_dict
+
+
+def FIGURE4_PANELC(structure, params):
+    """
+    Create a visualization with one protein per row and K loci as columns.
+    
+    Steps:
+      1. Extract all unique K loci from both 'K_locus_host' and 'specificity' columns.
+      2. Strip the 'KL' prefix and sort them numerically in ascending order.
+      3. Create a matrix with one row per protein (labeled on the left) and each sorted K locus as columns.
+         For each protein:
+           - If the protein is active against the same K locus as its host, color that cell green.
+           - If the protein is active against a different K locus than its host, mark two cells:
+             the active one in green and the host cell in red.
+      4. Sort the protein rows by the lowest active K locus number.
+      5. Move (append) all columns that are “host‐only” (i.e. no protein is active on that column) to the right.
+      6. If swap_axes is True, swap the X and Y axes (proteins become columns and K loci become rows).
+      
+    Colors used:
+       Green: #0E470E
+       Red:   #f06c6c
+    """
+    
+    import pandas as pd
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
+
+    # Use TrueType fonts in PDF for easier editing in Illustrator.
+    mpl.rcParams['pdf.fonttype'] = 42
+    mpl.rcParams['ps.fonttype'] = 42
+
+    # ---- Feature Switch: swap_axes ----
+    # If set True (in params), proteins become columns and K loci become rows.
+    swap_axes = False
+
+    # --- Data Loading ---
+    predictions_and_enzymes_table = structure['analyze']['predictions_and_enzymes_table']
+    output_pdf_path = structure['figures']['FIG4C']
+    
+    df = pd.read_csv(predictions_and_enzymes_table, sep='\t')
+    # Use only proteins that are active
+    df = df.query('source == "PROPHAGE_ZDKLAB" and activity == "ACTIVE"')
+    df = df[['proteinID', 'K_locus_host', 'specificity']]
+    
+    # --- Step 1: Extract Unique K Loci ---
+    unique_kloci = set()
+    for host in df['K_locus_host']:
+        unique_kloci.add(host.strip())
+    for spec in df['specificity']:
+        for k in spec.split('/'):
+            unique_kloci.add(k.strip())
+    
+    # --- Step 2: Strip 'KL' and sort ascending ---
+    def get_num(k):
+        k = k.strip()
+        if k.startswith("KL"):
+            try:
+                return int(k[2:])
+            except:
+                return float('inf')
+        else:
+            try:
+                return int(k)
+            except:
+                return float('inf')
+    
+    sorted_kloci = sorted(unique_kloci, key=get_num)
+    # Use the numeric part as string for internal computations.
+    sorted_kloci_str = [str(get_num(k)) for k in sorted_kloci]
+    
+    # --- Step 3: Build Data for Each Protein ---
+    protein_data = []
+    for idx, row in df.iterrows():
+        protein = row['proteinID']
+        host = row['K_locus_host'].strip()
+        host_num = str(get_num(host))
+        active_list = [k.strip() for k in row['specificity'].split('/')]
+        active_nums = [str(get_num(k)) for k in active_list]
+        protein_data.append((protein, host_num, active_nums))
+    
+    # --- Step 3a/3b: Determine Cell Colors per Protein Row ---
+    GREEN = "#0E470E"
+    RED = "#f06c6c"
+    cell_colors = {}
+    for protein, host_num, active_nums in protein_data:
+        if not active_nums:
+            continue
+        if host_num in active_nums:
+            cell_colors[(protein, host_num)] = GREEN
+        else:
+            for act in active_nums:
+                cell_colors[(protein, act)] = GREEN
+            cell_colors[(protein, host_num)] = RED
+
+    # --- Step 4: Sort Protein Rows ---
+    def protein_sort_key(item):
+        if item[2]:
+            return min(int(x) for x in item[2])
+        return float('inf')
+    sorted_protein_data = sorted(protein_data, key=protein_sort_key)
+    sorted_proteins = [protein for (protein, _, _) in sorted_protein_data]
+    
+    # --- Plot Configuration Dictionary ---
+    # Controls overall figure size, cell dimensions, and label fonts/offsets.
+    plot_config = {
+        "figsize": (len(sorted_kloci_str) * 0.5 + 3, len(sorted_proteins) * 0.5 + 3),
+        "cell_width": 1,
+        "cell_height": 1,
+        "protein_label_fontsize": 12,
+        "protein_label_offset": -0.2,  # for protein labels in non-swap mode (left side)
+        "k_label_fontsize": 12,
+        "k_label_rotation": 60,
+        "k_label_offset": 0.1         # vertical offset for K loci headers in non-swap mode (top)
+    }
+    
+    # --- New Feature: Sort Columns ---
+    # Separate sorted K loci columns into those that receive an active (GREEN) and those that are host-only.
+    active_set = set()
+    for (protein, col), color in cell_colors.items():
+        if color == GREEN:
+            active_set.add(col)
+    active_columns = [k for k in sorted_kloci_str if k in active_set]
+    host_only_columns = [k for k in sorted_kloci_str if k not in active_set]
+    # Final column order: active columns first, then host-only columns.
+    final_columns = active_columns + host_only_columns
+    
+    # --- Establish Grid Dimensions & Label Order Based on swap_axes ---
+    if not swap_axes:
+        # Normal mode: rows = proteins, columns = K loci.
+        row_labels = sorted_proteins
+        col_labels = final_columns
+        # For headers, protein labels remain as is; K loci get "KL" prefix.
+        row_prefix = ""          # protein labels: no prefix.
+        col_prefix = "KL"        # add "KL" to column labels.
+        # Offsets and font sizes come from plot_config as defined.
+    else:
+        # Swapped mode: rows = final_columns, columns = proteins.
+        row_labels = final_columns
+        col_labels = sorted_proteins
+        # Now, the row labels (left side) are the K loci; add "KL" prefix there.
+        row_prefix = "KL"
+        col_prefix = ""          # protein labels as column headers without prefix.
+        # Optionally swap the label sizes and offsets; here I simply swap the values.
+        # For example, using protein_label_fontsize for column headers and k_label_fontsize for row headers:
+        temp_fontsize = plot_config["protein_label_fontsize"]
+        plot_config["protein_label_fontsize"] = plot_config["k_label_fontsize"]
+        plot_config["k_label_fontsize"] = temp_fontsize
+        # Similarly swap the offsets if desired:
+        temp_offset = plot_config["protein_label_offset"]
+        plot_config["protein_label_offset"] = plot_config["k_label_offset"]
+        plot_config["k_label_offset"] = temp_offset
+
+    num_rows_grid = len(row_labels)
+    num_cols_grid = len(col_labels)
+    
+    # --- Create Visualization ---
+    fig, ax = plt.subplots(figsize=plot_config["figsize"])
+    
+    # Draw grid cells.
+    # Loop over rows and columns based on the current mode.
+    for i, row_lab in enumerate(row_labels):
+        # Compute y position: top row is index 0 -> y = num_rows_grid - 1 - i.
+        y = num_rows_grid - 1 - i
+        # Draw row label on left.
+        ax.text(plot_config["protein_label_offset"], y + plot_config["cell_height"]/2,
+                row_prefix + row_lab,
+                ha='right', va='center', fontsize=plot_config["protein_label_fontsize"],
+                fontweight='bold')
+        for j, col_lab in enumerate(col_labels):
+            x = j  # x position for column j.
+            # In cell, if we did not swap: cell corresponds to (protein, K locus).
+            # If swapped: cell corresponds to (protein, K locus) with protein = col_lab and K locus = row_lab.
+            if not swap_axes:
+                cell_color = cell_colors.get((row_lab, col_lab), "white")
+            else:
+                cell_color = cell_colors.get((col_lab, row_lab), "white")
+            rect = plt.Rectangle((x, y), plot_config["cell_width"], plot_config["cell_height"],
+                                 facecolor=cell_color, edgecolor="black")
+            ax.add_patch(rect)
+    
+    # Draw column headers.
+    for j, col_lab in enumerate(col_labels):
+        x = j + plot_config["cell_width"]/2
+        # Place header above the grid.
+        ax.text(x, num_rows_grid + plot_config["k_label_offset"], 
+                col_prefix + col_lab,
+                ha='center', va='bottom', fontsize=plot_config["k_label_fontsize"],
+                rotation=plot_config["k_label_rotation"], fontweight='bold')
+    
+    # Set axis limits.
+    ax.set_xlim(plot_config["protein_label_offset"] - 0.5, num_cols_grid)
+    ax.set_ylim(0, num_rows_grid)
+    ax.set_aspect('equal')
+    ax.axis('off')
+    plt.savefig(output_pdf_path, format='pdf', bbox_inches='tight')
+    plt.close(fig)
