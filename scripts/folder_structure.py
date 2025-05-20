@@ -23,8 +23,8 @@ class FolderStructure:
 
         # mmseqs params
         mmseqs_dict = {'mmseqs_binary': "/opt/homebrew/bin/mmseqs",
-                    'min_identity': 0.8,
-                    'min_coverage': 0.8,
+                    'min_identity': 0.5,
+                    'min_coverage': 0.5,
                     'max_evalue': 10**-3,
                     'sensitivity': 7.5,
                     'min_pc_freq': 0.001, # equivalent of min_af
@@ -154,10 +154,9 @@ class FolderStructure:
         proteins_dir = Path(prophages_dir, '4_FASTA_CDS_AA')
         proteins_files = list(Path(proteins_dir).glob('*.faa'))
 
-        lytic_table = Path(gwas_dir, 'DEPOLYMERASES_RECOMBINANT/LITERATURE_SEARCH/2025-01-22_LITERATURE_SEARCH.tsv')
-        lysogenic_table = Path(gwas_dir, 'DEPOLYMERASES_RECOMBINANT/PROPHAGES/2025-03-21_PROPHAGE_DEPOLYMERASES.xlsx')
-        predictions_table = Path(gwas_dir, 'DEPOLYMERASES_PREDICTIONS/BEST_DEPO_HITS.xlsx')
-
+        lytic_table = Path(gwas_dir, 'DEPOLYMERASES/LITERATURE_SEARCH/2025-03-18_LITERATURE_SEARCH.tsv')
+        lysogenic_table = Path(gwas_dir, 'DEPOLYMERASES/PROPHAGES/2025-05-10_PROPHAGE_DEPOLYMERASES.xlsx')
+        predictions_table = Path(gwas_dir, 'DEPOLYMERASES/PREDICTIONS/BEST_DEPO_HITS.xlsx')
 
         # dict
         input_dict = {

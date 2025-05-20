@@ -369,8 +369,8 @@ class InputProcessor:
         # rename
         rename_lysogenic_dict = {'protein seq': 'seq', 'expression level': 'expression', 'K_locus_specificity': 'specificity'}
         rename_lytic_dict = {'K_locus_specificity':'specificity', 'protein_seq': 'seq'}
-        genscript_list = ['0367_12','0574_17','0391_11','0496_72','021_14','391_03']
-
+        genscript_list = ['0367_12','0574_17','0391_11','0496_72','021_14','391_03','184_04','145_08','174_38','164_08']
+        
         # cols
         cols = ['proteinID', 'report', 'group', 'expression', 'specificity', 'K_locus_host', 'seq']
 
@@ -379,6 +379,7 @@ class InputProcessor:
         lytic_df = pd.read_csv(lytic_table, sep='\t').rename(rename_lytic_dict, axis=1)
 
         # clean lysogenic
+        lysogenic_df['specificity'] = lysogenic_df['specificity'].replace('K3/KL146', 'KL3/KL146')
         remove_na = ~((lysogenic_df['proteinID'].isna()) | (lysogenic_df['proteinID'] == 'GWAS:'))
         lysogenic_df = lysogenic_df.loc[remove_na].reset_index(drop=True)
         ugly_string = lysogenic_df['specificity'].str.contains('-')

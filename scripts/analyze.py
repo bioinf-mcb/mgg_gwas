@@ -119,7 +119,7 @@ class AnalyzeResults:
 
 		# iterate
 		for (version, mode, locus), group in groups:
-			
+
 			# symlink alignments
 			self._link_alignments(version, mode, locus, group)
 
@@ -155,7 +155,7 @@ class AnalyzeResults:
 		return pyseer_hits
 
 
-	def _get_subtree(self, version, mode, locus, variants_df, max_leaves=300, outgroup='398KBV'):
+	def _get_subtree(self, version, mode, locus, variants_df, max_leaves=200, outgroup='398KBV'):
 	
 		# paths
 		output_dir = Path(self.per_locus_dir) / f'{locus}/{mode}/phandango/{version}'
@@ -530,6 +530,9 @@ class AnalyzeResults:
 
 		recombinant_df.loc[recombinant_df['source'] == 'LITERATURE_SEARCH', 'specificity'] = \
 		recombinant_df.loc[recombinant_df['source'] == 'LITERATURE_SEARCH', 'specificity'].str.replace('K', 'KL')
+
+		recombinant_df.loc[recombinant_df['source'] == 'LITERATURE_SEARCH', 'specificity'] = \
+		recombinant_df.loc[recombinant_df['source'] == 'LITERATURE_SEARCH', 'specificity'].str.replace('KLL', 'KL')
 
 		recombinant_df.loc[recombinant_df['source'] == 'LITERATURE_SEARCH', 'specificity'] = \
 		recombinant_df.loc[recombinant_df['source'] == 'LITERATURE_SEARCH', 'specificity'].str.replace('KLN', 'KN')
